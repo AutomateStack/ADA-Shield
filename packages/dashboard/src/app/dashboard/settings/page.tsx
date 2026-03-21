@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Loader2, User, CreditCard, Shield, CheckCircle, ExternalLink, Bell, Mail } from 'lucide-react';
@@ -21,6 +21,14 @@ interface NotificationPrefs {
 }
 
 export default function SettingsPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>}>
+      <SettingsContent />
+    </Suspense>
+  );
+}
+
+function SettingsContent() {
   const [user, setUser] = useState<any>(null);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [notifPrefs, setNotifPrefs] = useState<NotificationPrefs>({

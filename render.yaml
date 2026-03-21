@@ -3,20 +3,30 @@ services:
     name: ada-shield-api
     runtime: node
     plan: free
-    buildCommand: npm install --workspace=packages/scanner --workspace=packages/api
-    startCommand: npm run start --workspace=packages/api
+    buildCommand: |
+      npm install --workspace=packages/scanner --workspace=packages/api
+      npx puppeteer browsers install chrome
+    startCommand: node packages/api/src/index.js
     envVars:
       - key: NODE_ENV
         value: production
+      - key: PUPPETEER_CACHE_DIR
+        value: /opt/render/.cache/puppeteer
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
-      - key: REDIS_URL
+      - key: SUPABASE_ANON_KEY
         sync: false
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_STARTER_PRICE_ID
+        sync: false
+      - key: STRIPE_BUSINESS_PRICE_ID
+        sync: false
+      - key: STRIPE_AGENCY_PRICE_ID
         sync: false
       - key: RESEND_API_KEY
         sync: false
@@ -24,4 +34,8 @@ services:
         sync: false
       - key: DASHBOARD_URL
         sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: PORT
+        value: "10000"
     healthCheckPath: /health

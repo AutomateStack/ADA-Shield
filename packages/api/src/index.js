@@ -25,8 +25,17 @@ const PORT = process.env.PORT || 4000;
 app.use('/api/webhooks/stripe', webhookRoutes);
 
 app.use(helmet());
+
+const allowedOrigins = [
+  'http://localhost:3000',
+  process.env.DASHBOARD_URL,
+].filter(Boolean);
+
 app.use(cors({
-  origin: process.env.DASHBOARD_URL || 'http://localhost:3000',
+  origin: (origin, cb) => {
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    cb(new Error('Not allowed by CORS'));
+  },
   credentials: true,
 }));
 app.use(express.json({ limit: '1mb' }));
