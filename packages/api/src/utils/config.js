@@ -7,6 +7,13 @@ const { logger } = require('./logger');
 const REQUIRED_VARS = [
   'SUPABASE_URL',
   'SUPABASE_SERVICE_ROLE_KEY',
+];
+
+/**
+ * Vars that are required in production but optional in dev.
+ * @type {string[]}
+ */
+const PROD_REQUIRED_VARS = [
   'REDIS_URL',
   'STRIPE_SECRET_KEY',
   'STRIPE_WEBHOOK_SECRET',
@@ -31,7 +38,11 @@ const OPTIONAL_VARS = {
  * Sets defaults for optional variables.
  */
 function validateConfig() {
-  const missing = REQUIRED_VARS.filter((v) => !process.env[v]);
+  const allRequired = process.env.NODE_ENV === 'production'
+    ? [...REQUIRED_VARS, ...PROD_REQUIRED_VARS]
+    : REQUIRED_VARS;
+
+  const missing = allRequired.filter((v) => !process.env[v]);
 
   if (missing.length > 0) {
     const msg = `Missing required environment variables: ${missing.join(', ')}`;

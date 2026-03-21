@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Shield, LayoutDashboard, Globe, Settings, LogOut } from 'lucide-react';
+import { Shield, LayoutDashboard, Globe, Settings, LogOut, CreditCard } from 'lucide-react';
 import { createSupabaseBrowser } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
 
 const navItems = [
   { href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
   { href: '/dashboard/sites', label: 'Sites', icon: Globe },
+  { href: '/dashboard/billing', label: 'Billing', icon: CreditCard },
   { href: '/dashboard/settings', label: 'Settings', icon: Settings },
 ];
 

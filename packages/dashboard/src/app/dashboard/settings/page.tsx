@@ -1,24 +1,84 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Loader2, User, CreditCard, Shield } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { Loader2, User, CreditCard, Shield, CheckCircle, ExternalLink } from 'lucide-react';
 import { createSupabaseBrowser } from '@/lib/supabase/client';
+
+interface Subscription {
+  plan: string;
+  status: string | null;
+  currentPeriodEnd: string | null;
+  pagesLimit: number;
+  sitesLimit: number;
+}
 
 export default function SettingsPage() {
   const [user, setUser] = useState<any>(null);
+  const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [loading, setLoading] = useState(true);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const searchParams = useSearchParams();
+  const checkoutSuccess = searchParams.get('checkout') === 'success';
 
   useEffect(() => {
     const load = async () => {
       const supabase = createSupabaseBrowser();
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      setUser(user);
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (session?.user) {
+        setUser(session.user);
+
+        // Fetch subscription from API
+        try {
+          const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+          const res = await fetch(`${apiUrl}/api/billing/subscription`, {
+            headers: { Authorization: `Bearer ${session.access_token}` },
+          });
+          if (res.ok) {
+            setSubscription(await res.json());
+          }
+        } catch {
+          // Subscription fetch failed — show free plan
+        }
+      }
+
       setLoading(false);
     };
     load();
   }, []);
+
+  const handleManageBilling = async () => {
+    setPortalLoading(true);
+    try {
+      const supabase = createSupabaseBrowser();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) return;
+
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+      const res = await fetch(`${apiUrl}/api/billing/portal`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+      const data = await res.json();
+      if (res.ok && data.url) {
+        window.location.href = data.url;
+      }
+    } catch {
+      // Portal request failed
+    } finally {
+      setPortalLoading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -28,9 +88,23 @@ export default function SettingsPage() {
     );
   }
 
+  const isPaid = subscription && subscription.plan !== 'free' && subscription.status === 'active';
+  const planLabel = subscription?.plan
+    ? subscription.plan.charAt(0).toUpperCase() + subscription.plan.slice(1)
+    : 'Free';
+
   return (
     <div>
       <h1 className="text-2xl font-bold text-white mb-8">Settings</h1>
+
+      {checkoutSuccess && (
+        <div className="mb-6 p-4 bg-green-500/10 border border-green-500/30 rounded-xl flex items-center gap-3">
+          <CheckCircle className="h-5 w-5 text-green-400 shrink-0" />
+          <p className="text-green-300 text-sm">
+            Payment successful! Your subscription is now active.
+          </p>
+        </div>
+      )}
 
       <div className="space-y-6">
         {/* Account Section */}
@@ -65,20 +139,73 @@ export default function SettingsPage() {
             <CreditCard className="h-5 w-5 text-green-400" />
             <h2 className="text-lg font-semibold text-white">Subscription</h2>
           </div>
-          <div className="flex items-center justify-between">
+
+          <div className="flex items-center justify-between mb-4">
             <div>
-              <p className="text-white font-medium">Free Plan</p>
-              <p className="text-sm text-slate-400">
-                Upgrade to unlock full scan results, weekly monitoring, and more.
-              </p>
+              <p className="text-white font-medium">{planLabel} Plan</p>
+              {isPaid && subscription.currentPeriodEnd && (
+                <p className="text-sm text-slate-400">
+                  Renews on{' '}
+                  {new Date(subscription.currentPeriodEnd).toLocaleDateString()}
+                </p>
+              )}
+              {!isPaid && (
+                <p className="text-sm text-slate-400">
+                  Upgrade to unlock full scan results, weekly monitoring, and more.
+                </p>
+              )}
             </div>
-            <span className="px-3 py-1 bg-slate-500/20 text-slate-300 text-sm rounded-full">
-              Free
+            <span
+              className={`px-3 py-1 text-sm rounded-full ${
+                isPaid
+                  ? 'bg-green-500/20 text-green-300'
+                  : 'bg-slate-500/20 text-slate-300'
+              }`}
+            >
+              {isPaid ? 'Active' : 'Free'}
             </span>
           </div>
-          <p className="text-xs text-slate-600 mt-4">
-            Billing integration coming soon with Stripe.
-          </p>
+
+          {isPaid && (
+            <div className="grid grid-cols-2 gap-4 mb-4 p-3 bg-white/5 rounded-lg">
+              <div>
+                <span className="text-xs text-slate-400">Sites Allowed</span>
+                <p className="text-white font-medium">
+                  {subscription.sitesLimit >= 9999 ? 'Unlimited' : subscription.sitesLimit}
+                </p>
+              </div>
+              <div>
+                <span className="text-xs text-slate-400">Pages per Scan</span>
+                <p className="text-white font-medium">
+                  {subscription.pagesLimit >= 9999 ? 'Unlimited' : subscription.pagesLimit}
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-3">
+            {isPaid ? (
+              <button
+                onClick={handleManageBilling}
+                disabled={portalLoading}
+                className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+              >
+                {portalLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ExternalLink className="h-4 w-4" />
+                )}
+                Manage Billing
+              </button>
+            ) : (
+              <Link
+                href="/dashboard/billing"
+                className="flex items-center gap-2 px-4 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-lg text-sm font-semibold transition-colors"
+              >
+                Upgrade Plan
+              </Link>
+            )}
+          </div>
         </div>
 
         {/* Danger Zone */}
