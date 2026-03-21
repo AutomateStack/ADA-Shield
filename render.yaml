@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: ada-shield-api
+    runtime: node
+    plan: free
+    buildCommand: npm install --workspace=packages/scanner --workspace=packages/api
+    startCommand: npm run start --workspace=packages/api
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: INTERNAL_API_SECRET
+        sync: false
+      - key: DASHBOARD_URL
+        sync: false
+    healthCheckPath: /health

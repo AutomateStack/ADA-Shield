@@ -1,0 +1,25 @@
+{
+  "name": "ada-shield",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ADA Shield — Website accessibility scanner and lawsuit risk calculator",
+  "workspaces": [
+    "packages/scanner",
+    "packages/api",
+    "packages/dashboard"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace=packages/api",
+    "dev:dashboard": "npm run dev --workspace=packages/dashboard",
+    "dev:scanner": "npm run dev --workspace=packages/scanner",
+    "build:dashboard": "npm run build --workspace=packages/dashboard",
+    "start:api": "npm run start --workspace=packages/api",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
