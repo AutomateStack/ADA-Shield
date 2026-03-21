@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Loader2, User, CreditCard, Shield, CheckCircle, ExternalLink } from 'lucide-react';
+import { Loader2, User, CreditCard, Shield, CheckCircle, ExternalLink, Bell, Mail } from 'lucide-react';
 import { createSupabaseBrowser } from '@/lib/supabase/client';
 
 interface Subscription {
@@ -14,9 +14,21 @@ interface Subscription {
   sitesLimit: number;
 }
 
+interface NotificationPrefs {
+  scanComplete: boolean;
+  riskAlerts: boolean;
+  weeklySummary: boolean;
+}
+
 export default function SettingsPage() {
   const [user, setUser] = useState<any>(null);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
+  const [notifPrefs, setNotifPrefs] = useState<NotificationPrefs>({
+    scanComplete: true,
+    riskAlerts: true,
+    weeklySummary: true,
+  });
+  const [notifSaving, setNotifSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [portalLoading, setPortalLoading] = useState(false);
   const searchParams = useSearchParams();
@@ -35,14 +47,22 @@ export default function SettingsPage() {
         // Fetch subscription from API
         try {
           const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-          const res = await fetch(`${apiUrl}/api/billing/subscription`, {
-            headers: { Authorization: `Bearer ${session.access_token}` },
-          });
-          if (res.ok) {
-            setSubscription(await res.json());
+          const [subRes, notifRes] = await Promise.all([
+            fetch(`${apiUrl}/api/billing/subscription`, {
+              headers: { Authorization: `Bearer ${session.access_token}` },
+            }),
+            fetch(`${apiUrl}/api/notifications`, {
+              headers: { Authorization: `Bearer ${session.access_token}` },
+            }),
+          ]);
+          if (subRes.ok) {
+            setSubscription(await subRes.json());
+          }
+          if (notifRes.ok) {
+            setNotifPrefs(await notifRes.json());
           }
         } catch {
-          // Subscription fetch failed — show free plan
+          // Fetch failed — show defaults
         }
       }
 
@@ -50,6 +70,41 @@ export default function SettingsPage() {
     };
     load();
   }, []);
+
+  const handleToggleNotification = async (
+    key: 'scanComplete' | 'riskAlerts' | 'weeklySummary'
+  ) => {
+    const newPrefs = { ...notifPrefs, [key]: !notifPrefs[key] };
+    setNotifPrefs(newPrefs);
+    setNotifSaving(true);
+
+    try {
+      const supabase = createSupabaseBrowser();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+      await fetch(`${apiUrl}/api/notifications`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          scan_complete: newPrefs.scanComplete,
+          risk_alerts: newPrefs.riskAlerts,
+          weekly_summary: newPrefs.weeklySummary,
+        }),
+      });
+    } catch {
+      // Revert on failure
+      setNotifPrefs(notifPrefs);
+    } finally {
+      setNotifSaving(false);
+    }
+  };
 
   const handleManageBilling = async () => {
     setPortalLoading(true);
@@ -205,6 +260,64 @@ export default function SettingsPage() {
                 Upgrade Plan
               </Link>
             )}
+          </div>
+        </div>
+
+        {/* Notification Preferences */}
+        <div className="bg-white/5 border border-white/10 rounded-xl p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <Bell className="h-5 w-5 text-amber-400" />
+            <h2 className="text-lg font-semibold text-white">Email Notifications</h2>
+            {notifSaving && (
+              <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+            )}
+          </div>
+          <div className="space-y-4">
+            {([
+              {
+                key: 'scanComplete' as const,
+                label: 'Scan Complete',
+                description: 'Get notified when a scan finishes with results summary.',
+                icon: <CheckCircle className="h-4 w-4 text-green-400" />,
+              },
+              {
+                key: 'riskAlerts' as const,
+                label: 'High Risk Alerts',
+                description: 'Receive urgent alerts when a site scores 70+ risk.',
+                icon: <Shield className="h-4 w-4 text-red-400" />,
+              },
+              {
+                key: 'weeklySummary' as const,
+                label: 'Weekly Summary',
+                description: 'Get a weekly email summarizing all monitored sites.',
+                icon: <Mail className="h-4 w-4 text-brand-400" />,
+              },
+            ]).map((item) => (
+              <div
+                key={item.key}
+                className="flex items-center justify-between p-3 bg-white/5 rounded-lg"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5">{item.icon}</div>
+                  <div>
+                    <p className="text-sm font-medium text-white">{item.label}</p>
+                    <p className="text-xs text-slate-400">{item.description}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleToggleNotification(item.key)}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${
+                    notifPrefs[item.key] ? 'bg-brand-600' : 'bg-slate-600'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
+                      notifPrefs[item.key] ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+            ))}
           </div>
         </div>
 

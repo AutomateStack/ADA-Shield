@@ -10,6 +10,7 @@ const { scanRoutes } = require('./routes/scan');
 const { webhookRoutes } = require('./routes/webhooks');
 const { internalRoutes } = require('./routes/internal');
 const { billingRoutes } = require('./routes/billing');
+const { notificationRoutes } = require('./routes/notifications');
 const { errorHandler } = require('./middleware/error-handler');
 const { createRateLimiter } = require('./middleware/rate-limiter');
 
@@ -41,6 +42,7 @@ app.get('/health', (_req, res) => {
 // ── API Routes ──────────────────────────────────────────────────────
 app.use('/api/scan', scanRoutes);
 app.use('/api/billing', billingRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/internal', internalRoutes);
 
 // ── 404 Handler ─────────────────────────────────────────────────────

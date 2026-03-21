@@ -1,13 +1,14 @@
 const { Router } = require('express');
 const { z } = require('zod');
-const { createScanQueue, addScanJob } = require('@ada-shield/scanner');
 const { scanPage } = require('@ada-shield/scanner');
 const { calculateRiskScore } = require('@ada-shield/scanner');
-const { saveScanResult } = require('../db/scans');
+const { saveScanResult, updateSiteLastScanned } = require('../db/scans');
 const { getUserSubscription, PLAN_LIMITS } = require('../db/subscriptions');
 const { getUserSites } = require('../db/sites');
+const { getNotificationPrefs } = require('../db/notifications');
 const { createRateLimiter } = require('../middleware/rate-limiter');
 const { authenticate, optionalAuth } = require('../middleware/auth');
+const { sendScanCompleteEmail, sendRiskAlertEmail } = require('../services/email');
 const { logger } = require('../utils/logger');
 
 const router = Router();
@@ -120,56 +121,82 @@ router.post(
         return res.status(404).json({ error: 'Site not found' });
       }
 
-      // Queue the scan job
-      const queue = createScanQueue(process.env.REDIS_URL);
-      const job = await addScanJob(queue, {
-        url: site.url,
+      // Run scan synchronously
+      logger.info('Authenticated scan started', { siteId, userId, url: site.url });
+      const scanResult = await scanPage(site.url);
+      const riskResult = calculateRiskScore(scanResult.violations);
+
+      // Save to database
+      const saved = await saveScanResult({
         siteId,
         userId,
-        isFreeScan: false,
-        pageLimit: limits.pagesLimit,
+        url: scanResult.url,
+        riskScore: riskResult.score,
+        totalViolations: scanResult.totalViolations,
+        criticalCount: scanResult.criticalCount,
+        seriousCount: scanResult.seriousCount,
+        moderateCount: scanResult.moderateCount,
+        minorCount: scanResult.minorCount,
+        violations: scanResult.violations,
+        passedRules: scanResult.passedRules,
+        incompleteRules: scanResult.incompleteRules || 0,
+        scanDurationMs: scanResult.scanDurationMs,
       });
 
-      logger.info('Authenticated scan queued', {
-        jobId: job.id,
-        siteId,
-        userId,
-      });
+      await updateSiteLastScanned(siteId);
 
-      return res.json({
-        jobId: job.id,
-        status: 'queued',
-        message: 'Scan queued successfully. Poll /api/scan/status/:jobId for updates.',
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-);
+      // Send notification emails (non-blocking)
+      const dashboardUrl = process.env.DASHBOARD_URL || 'http://localhost:3000';
+      const userEmail = req.user.email;
 
-// ── Scan Status Endpoint ────────────────────────────────────────────
-router.get(
-  '/status/:jobId',
-  optionalAuth,
-  async (req, res, next) => {
-    try {
-      const { jobId } = req.params;
-      const queue = createScanQueue(process.env.REDIS_URL);
-      const job = await queue.getJob(jobId);
+      if (userEmail) {
+        const prefs = await getNotificationPrefs(userId);
+        const siteName = site.name || new URL(site.url).hostname;
 
-      if (!job) {
-        return res.status(404).json({ error: 'Job not found' });
+        if (prefs.scan_complete) {
+          sendScanCompleteEmail({
+            to: userEmail,
+            siteName,
+            siteUrl: site.url,
+            riskScore: riskResult.score,
+            riskLevel: riskResult.level,
+            totalViolations: scanResult.totalViolations,
+            criticalCount: scanResult.criticalCount,
+            seriousCount: scanResult.seriousCount,
+            dashboardUrl: `${dashboardUrl}/dashboard/sites/${siteId}`,
+          }).catch(() => {}); // Fire and forget
+        }
+
+        if (riskResult.score >= 70 && prefs.risk_alerts) {
+          sendRiskAlertEmail({
+            to: userEmail,
+            siteName,
+            siteUrl: site.url,
+            riskScore: riskResult.score,
+            criticalCount: scanResult.criticalCount,
+            seriousCount: scanResult.seriousCount,
+            dashboardUrl: `${dashboardUrl}/dashboard/sites/${siteId}`,
+          }).catch(() => {}); // Fire and forget
+        }
       }
 
-      const state = await job.getState();
-      const result = job.returnvalue;
+      logger.info('Authenticated scan completed', { siteId, userId, riskScore: riskResult.score });
 
       return res.json({
-        jobId: job.id,
-        status: state,
-        progress: job.progress,
-        result: state === 'completed' ? result : null,
-        failedReason: state === 'failed' ? job.failedReason : null,
+        scanId: saved.id,
+        status: 'completed',
+        url: scanResult.url,
+        riskScore: riskResult.score,
+        riskLevel: riskResult.level,
+        riskColor: riskResult.color,
+        totalViolations: scanResult.totalViolations,
+        criticalCount: scanResult.criticalCount,
+        seriousCount: scanResult.seriousCount,
+        moderateCount: scanResult.moderateCount,
+        minorCount: scanResult.minorCount,
+        violations: scanResult.violations,
+        passedRules: scanResult.passedRules,
+        scanDurationMs: scanResult.scanDurationMs,
       });
     } catch (error) {
       next(error);
