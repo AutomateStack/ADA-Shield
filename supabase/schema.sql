@@ -1,6 +1,9 @@
 -- ADA Shield Database Schema
 -- Run this in Supabase SQL Editor
 
+-- Enable pgcrypto for gen_random_uuid()
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- ═══════════════════════════════════════════════════════════════════
 -- Sites table
 -- ═══════════════════════════════════════════════════════════════════
@@ -78,9 +81,9 @@ ALTER TABLE notification_preferences ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users manage own sites" ON sites
   FOR ALL USING (auth.uid() = user_id);
 
--- Scan results: users can only see their own scans on their own sites
+-- Scan results: users can only see their own scans on their own sites (read-only; writes are server-only)
 CREATE POLICY "Users see own scans" ON scan_results
-  FOR ALL USING (
+  FOR SELECT USING (
     auth.uid() = user_id
     AND EXISTS (
       SELECT 1 FROM sites
@@ -89,9 +92,9 @@ CREATE POLICY "Users see own scans" ON scan_results
     )
   );
 
--- Subscriptions: users can only see their own subscription
+-- Subscriptions: users can only see their own subscription (read-only; writes are via Stripe webhook/service role)
 CREATE POLICY "Users see own subscription" ON subscriptions
-  FOR ALL USING (auth.uid() = user_id);
+  FOR SELECT USING (auth.uid() = user_id);
 
 -- Notification preferences: users can only manage their own
 CREATE POLICY "Users manage own notification prefs" ON notification_preferences

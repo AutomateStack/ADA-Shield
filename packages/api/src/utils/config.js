@@ -6,6 +6,7 @@ const { logger } = require('./logger');
  */
 const REQUIRED_VARS = [
   'SUPABASE_URL',
+  'SUPABASE_ANON_KEY',
   'SUPABASE_SERVICE_ROLE_KEY',
 ];
 

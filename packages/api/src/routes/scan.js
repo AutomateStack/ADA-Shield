@@ -3,7 +3,7 @@ const { z } = require('zod');
 const { scanPage } = require('@ada-shield/scanner');
 const { calculateRiskScore } = require('@ada-shield/scanner');
 const { getUserSubscription, PLAN_LIMITS } = require('../db/subscriptions');
-const { getUserSites } = require('../db/sites');
+const { getUserSites, getUserSiteById } = require('../db/sites');
 const { createRateLimiter } = require('../middleware/rate-limiter');
 const { authenticate } = require('../middleware/auth');
 const { logger } = require('../utils/logger');
@@ -46,7 +46,7 @@ router.post(
 
       logger.info('Free scan requested', { url, ip: req.ip });
 
-      // Run scan synchronously for free scans (up to 3 pages)
+      // Run scan synchronously for free scans (single page; results limited to 3 violations)
       const scanResult = await scanPage(url);
       const riskResult = calculateRiskScore(scanResult.violations);
 
@@ -156,6 +156,10 @@ router.get(
       if (!status) {
         return res.status(404).json({ error: 'Job not found' });
       }
+      // Verify the job belongs to the requesting user; treat missing userId as unauthorized
+      if (status.userId !== req.user.id) {
+        return res.status(status.userId ? 403 : 404).json({ error: 'Access denied' });
+      }
       return res.json(status);
     } catch (error) {
       next(error);
@@ -170,6 +174,14 @@ router.get(
   async (req, res, next) => {
     try {
       const { siteId } = req.params;
+      const userId = req.user.id;
+
+      // Verify the site belongs to the requesting user before fetching results
+      const site = await getUserSiteById(siteId, userId);
+      if (!site) {
+        return res.status(404).json({ error: 'Site not found' });
+      }
+
       const { getScanResults } = require('../db/scans');
       const results = await getScanResults(siteId);
       return res.json({ results });

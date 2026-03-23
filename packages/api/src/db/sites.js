@@ -78,6 +78,29 @@ async function getSiteById(siteId) {
 }
 
 /**
+ * Gets a single site by ID, scoped to the given user (ownership check).
+ * @param {string} siteId - Site UUID.
+ * @param {string} userId - User UUID.
+ * @returns {Promise<object|null>} Site row or null if not found / not owned by user.
+ */
+async function getUserSiteById(siteId, userId) {
+  try {
+    const { data, error } = await supabase
+      .from('sites')
+      .select('*')
+      .eq('id', siteId)
+      .eq('user_id', userId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw error;
+    return data || null;
+  } catch (error) {
+    logger.error('Failed to get site by id for user', { siteId, userId, error: error.message });
+    throw error;
+  }
+}
+
+/**
  * Gets all sites where monitoring is active (for weekly scans).
  * @returns {Promise<Array>} Array of site rows with active monitoring.
  */
@@ -117,6 +140,7 @@ module.exports = {
   createSite,
   getUserSites,
   getSiteById,
+  getUserSiteById,
   getMonitoredSites,
   deleteSite,
 };

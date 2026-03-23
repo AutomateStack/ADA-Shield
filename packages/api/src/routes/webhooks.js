@@ -109,8 +109,21 @@ async function handleSubscriptionUpdated(subscription) {
   const plan = getPlanFromPriceId(priceId);
   const limits = PLAN_LIMITS[plan] || PLAN_LIMITS.starter;
 
+  const userId = subscription.metadata?.userId;
+  if (!userId) {
+    // Legacy/incomplete subscriptions may lack metadata.userId.
+    // Still update the status so changes are not silently ignored.
+    await updateSubscriptionStatus(subscription.id, subscription.status);
+    logger.error('Missing userId in subscription metadata — updated status only', {
+      stripeSubscriptionId: subscription.id,
+      stripeCustomerId: subscription.customer,
+      status: subscription.status,
+    });
+    return;
+  }
+
   await upsertSubscription({
-    userId: subscription.metadata?.userId,
+    userId,
     stripeCustomerId: subscription.customer,
     stripeSubscriptionId: subscription.id,
     plan,

@@ -107,6 +107,7 @@ async function getScanJobStatus(jobId) {
   const state = await job.getState();
   return {
     jobId: job.id,
+    userId: job.data?.userId || null,
     state,
     returnValue: job.returnvalue || null,
     failedReason: job.failedReason || null,
@@ -134,6 +135,13 @@ function initScanWorker() {
       logger.info('Processing scan job', { jobId: job.id, url, attempt: job.attemptsMade + 1 });
 
       // Run accessibility scan
+      // NOTE: pageLimit is stored in job data for future multi-page crawling support.
+      // Currently only the entry URL is scanned.
+      if (pageLimit > 1) {
+        logger.warn('pageLimit > 1 requested but multi-page crawling is not yet implemented; scanning entry URL only', {
+          jobId: job.id, url, pageLimit,
+        });
+      }
       const scanResult = await scanPage(url);
       const riskResult = calculateRiskScore(scanResult.violations);
 

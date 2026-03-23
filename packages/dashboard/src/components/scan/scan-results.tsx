@@ -19,8 +19,15 @@ export function ScanResults({ result }: ScanResultsProps) {
       ? result.violations
       : result.violations.filter((v: any) => v.impact === filter);
 
+  // Prefer a backend-provided total violating rules count when available (avoids
+  // undercounting on free scans where the violations array is intentionally truncated).
+  const violatingRulesCount = result.totalViolatingRules ?? result.violations.length;
+
+  const totalRules =
+    result.passedRules + violatingRulesCount + (result.incompleteRules ?? 0);
+
   const filters: { value: ImpactFilter; label: string; count?: number }[] = [
-    { value: 'all', label: 'All', count: result.violations.length },
+    { value: 'all', label: 'All', count: violatingRulesCount },
     { value: 'critical', label: 'Critical', count: result.criticalCount },
     { value: 'serious', label: 'Serious', count: result.seriousCount },
     { value: 'moderate', label: 'Moderate', count: result.moderateCount },
@@ -71,7 +78,7 @@ export function ScanResults({ result }: ScanResultsProps) {
               icon={<CheckCircle className="h-5 w-5 text-green-400" />}
               sublabel={
                 <span className="text-xs text-slate-500">
-                  of {result.passedRules + result.totalViolations} total rules
+                  of {totalRules} total rules
                 </span>
               }
             />
