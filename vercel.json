@@ -1,5 +1,5 @@
 {
-  "installCommand": "npm ci",
+  "installCommand": "npm ci --workspace=packages/dashboard",
   "buildCommand": "npm run build",
   "outputDirectory": "packages/dashboard/.next",
   "framework": "nextjs",

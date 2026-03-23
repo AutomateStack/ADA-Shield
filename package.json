@@ -21,6 +21,6 @@
     "docker:down": "docker-compose down"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20.0.0 <23"
   }
 }
