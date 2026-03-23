@@ -7,7 +7,7 @@ const { getUserSites, getUserSiteById } = require('../db/sites');
 const { createRateLimiter } = require('../middleware/rate-limiter');
 const { authenticate } = require('../middleware/auth');
 const { logger } = require('../utils/logger');
-const { enqueueScanJob, getScanJobStatus } = require('../services/scan-queue');
+const { enqueueScanJob, getScanJobStatus, getScanQueue } = require('../services/scan-queue');
 
 const router = Router();
 
@@ -122,6 +122,14 @@ router.post(
       // Compute effective page limit (capped to the plan's maximum)
       const effectivePageLimit = limits.pagesLimit;
 
+      // Guard: queue requires Redis — return 503 if not configured
+      if (!getScanQueue()) {
+        return res.status(503).json({
+          error: 'Scan queue unavailable',
+          message: 'Async scanning requires Redis. Please contact support.',
+        });
+      }
+
       // Enqueue the scan job via BullMQ
       logger.info('Authenticated scan queued', { siteId, userId, url: site.url, effectivePageLimit });
 
@@ -151,6 +159,14 @@ router.get(
   authenticate,
   async (req, res, next) => {
     try {
+      // Guard: queue requires Redis — return 503 if not configured
+      if (!getScanQueue()) {
+        return res.status(503).json({
+          error: 'Scan queue unavailable',
+          message: 'Async scanning requires Redis. Please contact support.',
+        });
+      }
+
       const { jobId } = req.params;
       const status = await getScanJobStatus(jobId);
       if (!status) {
