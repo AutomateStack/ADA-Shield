@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 
+# Puppeteer Chrome cache (installed at build time on Render)
+.cache/
+
 # Environment variables
 .env
 .env.local

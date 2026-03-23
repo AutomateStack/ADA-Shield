@@ -6,34 +6,30 @@ const { logger } = require('./utils/logger');
  * Default Puppeteer launch options
  * @type {import('puppeteer').LaunchOptions}
  */
-// Resolve Chrome executable: use explicit path env var first,
-// then fall back to puppeteer.executablePath() which honours PUPPETEER_CACHE_DIR.
+// Resolve Chrome executable path at call-time (not module load) so that
+// PUPPETEER_CACHE_DIR is guaranteed to be set when the lookup runs.
 function getChromePath() {
   if (process.env.PUPPETEER_EXECUTABLE_PATH) {
     return process.env.PUPPETEER_EXECUTABLE_PATH;
   }
   try {
     return puppeteer.executablePath();
-  } catch {
+  } catch (err) {
+    logger.warn('Could not resolve Chrome executable path', { error: err.message });
     return undefined;
   }
 }
 
-const DEFAULT_BROWSER_OPTIONS = {
-  headless: true,
-  executablePath: getChromePath(),
-  args: [
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage',
-    '--disable-gpu',
-    '--disable-extensions',
-    '--disable-background-networking',
-    '--no-zygote',
-    '--memory-pressure-off',
-  ],
-  timeout: 30000,
-};
+const BROWSER_ARGS = [
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-dev-shm-usage',
+  '--disable-gpu',
+  '--disable-extensions',
+  '--disable-background-networking',
+  '--no-zygote',
+  '--memory-pressure-off',
+];
 
 /**
  * Default page navigation options
@@ -58,7 +54,16 @@ async function scanPage(url, options = {}) {
   try {
     logger.info('Starting scan', { url });
 
-    browser = await puppeteer.launch(DEFAULT_BROWSER_OPTIONS);
+    // Resolve Chrome path at call-time so PUPPETEER_CACHE_DIR is fully set
+    const executablePath = getChromePath();
+    logger.info('Launching Chrome', { executablePath: executablePath || 'puppeteer default' });
+
+    browser = await puppeteer.launch({
+      headless: true,
+      executablePath,
+      args: BROWSER_ARGS,
+      timeout: 30000,
+    });
     const page = await browser.newPage();
 
     // Set a realistic viewport and user agent

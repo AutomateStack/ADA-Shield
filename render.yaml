@@ -5,7 +5,7 @@ services:
     plan: free
     buildCommand: |
       npm install
-      npx puppeteer browsers install chrome
+      PUPPETEER_CACHE_DIR=/opt/render/project/src/.cache/puppeteer npx puppeteer browsers install chrome
     startCommand: node packages/api/src/index.js
     envVars:
       - key: NODE_ENV
@@ -13,7 +13,7 @@ services:
       - key: REDIS_URL
         sync: false
       - key: PUPPETEER_CACHE_DIR
-        value: /opt/render/.cache/puppeteer
+        value: /opt/render/project/src/.cache/puppeteer
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
