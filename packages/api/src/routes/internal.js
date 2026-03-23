@@ -149,7 +149,7 @@ router.post('/trigger-weekly-scan', async (req, res, next) => {
     logger.error('Weekly scan trigger error', { error: error.message, stack: error.stack });
 
     if (process.env.NODE_ENV === 'production') {
-      return res.status(statusCode).json({
+      return res.status(500).json({
         error: 'Internal server error',
       });
     }
