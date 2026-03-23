@@ -1,0 +1,7 @@
+{
+  "buildCommand": "npm ci && npm run build",
+  "outputDirectory": "packages/dashboard/.next",
+  "framework": "nextjs",
+  "devCommand": "npm run dev:dashboard",
+  "ignoreCommand": "git diff HEAD^ HEAD --quiet -- packages/dashboard/ packages/scanner/ package.json package-lock.json"
+}
