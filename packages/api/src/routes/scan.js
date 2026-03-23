@@ -4,6 +4,7 @@ const { scanPage } = require('@ada-shield/scanner');
 const { calculateRiskScore } = require('@ada-shield/scanner');
 const { getUserSubscription, PLAN_LIMITS } = require('../db/subscriptions');
 const { getUserSites, getUserSiteById } = require('../db/sites');
+const { saveScanResult } = require('../db/scans');
 const { createRateLimiter } = require('../middleware/rate-limiter');
 const { authenticate } = require('../middleware/auth');
 const { logger } = require('../utils/logger');
@@ -49,6 +50,25 @@ router.post(
       // Run scan synchronously for free scans (single page; results limited to 3 violations)
       const scanResult = await scanPage(url);
       const riskResult = calculateRiskScore(scanResult.violations);
+
+      // Persist full scan result to DB (fire-and-forget — don't block the response)
+      saveScanResult({
+        url: scanResult.url,
+        siteId: null,
+        userId: null,
+        riskScore: riskResult.score,
+        totalViolations: scanResult.totalViolations,
+        criticalCount: scanResult.criticalCount,
+        seriousCount: scanResult.seriousCount,
+        moderateCount: scanResult.moderateCount,
+        minorCount: scanResult.minorCount,
+        violations: scanResult.violations,
+        passedRules: scanResult.passedRules,
+        incompleteRules: scanResult.incompleteRules || 0,
+        scanDurationMs: scanResult.scanDurationMs,
+      }).catch((err) =>
+        logger.error('Failed to persist free scan result', { url, error: err.message })
+      );
 
       // Free scan: return risk score + first 3 violations only
       const limitedViolations = scanResult.violations.slice(0, 3);
