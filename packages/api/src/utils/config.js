@@ -12,10 +12,11 @@ const REQUIRED_VARS = [
 
 /**
  * Vars that are required in production but optional in dev.
+ * REDIS_URL is intentionally omitted — BullMQ queue is optional;
+ * the app runs without it (async scans will be unavailable).
  * @type {string[]}
  */
 const PROD_REQUIRED_VARS = [
-  'REDIS_URL',
   'STRIPE_SECRET_KEY',
   'STRIPE_WEBHOOK_SECRET',
   'INTERNAL_API_SECRET',
