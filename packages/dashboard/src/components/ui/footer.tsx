@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Shield } from 'lucide-react';
+import { ShieldLogo } from '@/components/ui/shield-logo';
 
 export function Footer() {
   return (
@@ -9,7 +9,7 @@ export function Footer() {
           {/* Brand */}
           <div className="md:col-span-1">
             <div className="flex items-center gap-2 mb-4">
-              <Shield className="h-6 w-6 text-brand-400" />
+              <ShieldLogo className="h-7 w-7" />
               <span className="text-lg font-bold text-white">ADA Shield</span>
             </div>
             <p className="text-sm text-slate-400">

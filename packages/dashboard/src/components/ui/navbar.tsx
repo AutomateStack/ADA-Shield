@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Shield, Menu, X } from 'lucide-react';
+import { Menu, X } from 'lucide-react';
+import { ShieldLogo } from '@/components/ui/shield-logo';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 
@@ -20,8 +21,8 @@ export function Navbar() {
     <header className="fixed top-0 left-0 right-0 z-50 bg-slate-900/80 backdrop-blur-lg border-b border-white/10">
       <nav className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-2 group">
-          <Shield className="h-7 w-7 text-brand-400 group-hover:text-brand-300 transition-colors" />
+        <Link href="/" className="flex items-center gap-2.5 group">
+          <ShieldLogo className="h-8 w-8 transition-opacity group-hover:opacity-90" />
           <span className="text-xl font-bold text-white">ADA Shield</span>
         </Link>
 
