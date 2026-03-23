@@ -94,7 +94,7 @@ export default function SiteDetailPage() {
       } = await supabase.auth.getSession();
 
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/scan/free`,
+        `${process.env.NEXT_PUBLIC_API_URL}/api/scan/run`,
         {
           method: 'POST',
           headers: {
@@ -103,7 +103,7 @@ export default function SiteDetailPage() {
               ? { Authorization: `Bearer ${session.access_token}` }
               : {}),
           },
-          body: JSON.stringify({ url: site.url }),
+          body: JSON.stringify({ url: site.url, siteId }),
         }
       );
 
@@ -115,7 +115,7 @@ export default function SiteDetailPage() {
       const result = await res.json();
 
       // Save to database
-      const { data: saved } = await supabase
+      const { data: saved, error: insertError } = await supabase
         .from('scan_results')
         .insert({
           site_id: siteId,
@@ -134,16 +134,22 @@ export default function SiteDetailPage() {
         .select()
         .single();
 
+      if (insertError) throw new Error(insertError.message || 'Failed to save scan results');
+
       if (saved) {
         setScans([saved, ...scans]);
         setSelectedScan(saved);
       }
 
       // Update last_scanned_at
-      await supabase
+      const { error: updateError } = await supabase
         .from('sites')
         .update({ last_scanned_at: new Date().toISOString() })
         .eq('id', siteId);
+
+      if (updateError) {
+        console.error('Failed to update last_scanned_at:', updateError.message);
+      }
     } catch (err: any) {
       alert(err.message || 'Scan failed');
     } finally {

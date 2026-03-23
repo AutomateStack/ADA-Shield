@@ -2,6 +2,38 @@ const { Resend } = require('resend');
 const { logger } = require('../utils/logger');
 
 /**
+ * Escapes HTML special characters to prevent injection in email templates.
+ * @param {*} value - The value to escape.
+ * @returns {string} HTML-escaped string.
+ */
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * Validates that a URL is http/https to prevent link injection.
+ * Returns the URL if safe, otherwise returns '#'.
+ * @param {string} url - The URL to validate.
+ * @returns {string} Safe URL.
+ */
+function safeUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return url;
+    }
+  } catch {
+    // invalid URL
+  }
+  return '#';
+}
+
+/**
  * Creates a Resend client. Returns null if API key is not configured.
  */
 function getResendClient() {
@@ -27,6 +59,9 @@ async function sendScanCompleteEmail({ to, siteName, siteUrl, riskScore, riskLev
   const riskColor = riskScore >= 70 ? '#ef4444' : riskScore >= 40 ? '#f59e0b' : '#22c55e';
   const riskEmoji = riskScore >= 70 ? '🔴' : riskScore >= 40 ? '🟡' : '🟢';
 
+  const safeSiteName = escapeHtml(siteName);
+  const safeDashboardUrl = safeUrl(dashboardUrl);
+
   try {
     const { data, error } = await resend.emails.send({
       from: EMAIL_FROM,
@@ -43,7 +78,7 @@ async function sendScanCompleteEmail({ to, siteName, siteUrl, riskScore, riskLev
     </div>
     <div style="background:#1e293b;border-radius:12px;padding:32px;border:1px solid rgba(255,255,255,0.1);">
       <h2 style="color:#fff;font-size:20px;margin:0 0 8px;">Scan Complete</h2>
-      <p style="color:#94a3b8;margin:0 0 24px;">Your accessibility scan for <strong style="color:#fff;">${siteName}</strong> has finished.</p>
+      <p style="color:#94a3b8;margin:0 0 24px;">Your accessibility scan for <strong style="color:#fff;">${safeSiteName}</strong> has finished.</p>
       
       <div style="text-align:center;padding:24px;background:#0f172a;border-radius:8px;margin-bottom:24px;">
         <div style="font-size:48px;font-weight:bold;color:${riskColor};">${riskScore}</div>
@@ -68,7 +103,7 @@ async function sendScanCompleteEmail({ to, siteName, siteUrl, riskScore, riskLev
       </table>
 
       <div style="text-align:center;">
-        <a href="${dashboardUrl}" style="display:inline-block;background:#6366f1;color:#fff;text-decoration:none;padding:12px 32px;border-radius:8px;font-weight:600;font-size:14px;">
+        <a href="${safeDashboardUrl}" style="display:inline-block;background:#6366f1;color:#fff;text-decoration:none;padding:12px 32px;border-radius:8px;font-weight:600;font-size:14px;">
           View Full Report →
         </a>
       </div>
@@ -100,6 +135,10 @@ async function sendRiskAlertEmail({ to, siteName, siteUrl, riskScore, criticalCo
     return null;
   }
 
+  const safeSiteName = escapeHtml(siteName);
+  const safeSiteUrl = escapeHtml(siteUrl);
+  const safeDashboardUrl = safeUrl(dashboardUrl);
+
   try {
     const { data, error } = await resend.emails.send({
       from: EMAIL_FROM,
@@ -120,7 +159,7 @@ async function sendRiskAlertEmail({ to, siteName, siteUrl, riskScore, criticalCo
         <h2 style="color:#ef4444;font-size:20px;margin:0;">High Lawsuit Risk Detected</h2>
       </div>
       <p style="color:#94a3b8;margin:0 0 24px;">
-        Your site <strong style="color:#fff;">${siteName}</strong> (${siteUrl}) has a risk score of 
+        Your site <strong style="color:#fff;">${safeSiteName}</strong> (${safeSiteUrl}) has a risk score of 
         <strong style="color:#ef4444;">${riskScore}/100</strong>, which indicates a high probability of ADA-related legal action.
       </p>
       
@@ -135,7 +174,7 @@ async function sendRiskAlertEmail({ to, siteName, siteUrl, riskScore, criticalCo
       </p>
 
       <div style="text-align:center;">
-        <a href="${dashboardUrl}" style="display:inline-block;background:#ef4444;color:#fff;text-decoration:none;padding:12px 32px;border-radius:8px;font-weight:600;font-size:14px;">
+        <a href="${safeDashboardUrl}" style="display:inline-block;background:#ef4444;color:#fff;text-decoration:none;padding:12px 32px;border-radius:8px;font-weight:600;font-size:14px;">
           Fix Issues Now →
         </a>
       </div>
@@ -172,7 +211,7 @@ async function sendWeeklySummaryEmail({ to, sites, dashboardUrl }) {
       const riskColor = s.riskScore >= 70 ? '#ef4444' : s.riskScore >= 40 ? '#f59e0b' : '#22c55e';
       return `
         <tr>
-          <td style="padding:12px;border-bottom:1px solid rgba(255,255,255,0.05);color:#fff;">${s.name}</td>
+          <td style="padding:12px;border-bottom:1px solid rgba(255,255,255,0.05);color:#fff;">${escapeHtml(s.name)}</td>
           <td style="padding:12px;border-bottom:1px solid rgba(255,255,255,0.05);text-align:center;">
             <span style="color:${riskColor};font-weight:bold;">${s.riskScore}</span>
           </td>
@@ -185,6 +224,7 @@ async function sendWeeklySummaryEmail({ to, sites, dashboardUrl }) {
     .join('');
 
   const highRiskCount = sites.filter((s) => s.riskScore >= 70).length;
+  const safeDashboardUrl = safeUrl(dashboardUrl);
 
   try {
     const { data, error } = await resend.emails.send({
@@ -217,7 +257,7 @@ async function sendWeeklySummaryEmail({ to, sites, dashboardUrl }) {
       </table>
 
       <div style="text-align:center;margin-top:24px;">
-        <a href="${dashboardUrl}" style="display:inline-block;background:#6366f1;color:#fff;text-decoration:none;padding:12px 32px;border-radius:8px;font-weight:600;font-size:14px;">
+        <a href="${safeDashboardUrl}" style="display:inline-block;background:#6366f1;color:#fff;text-decoration:none;padding:12px 32px;border-radius:8px;font-weight:600;font-size:14px;">
           View Dashboard →
         </a>
       </div>
