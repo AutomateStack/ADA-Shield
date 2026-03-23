@@ -24,8 +24,8 @@ export default function DashboardError({
           </div>
         </div>
 
-        <h2 className="text-2xl font-bold text-slate-900 mb-2">Something went wrong</h2>
-        <p className="text-slate-500 mb-6">
+        <h2 className="text-2xl font-bold text-white mb-2">Something went wrong</h2>
+        <p className="text-slate-400 mb-6">
           We encountered an error loading this page. Please try again.
         </p>
 
@@ -39,7 +39,7 @@ export default function DashboardError({
           </button>
           <Link
             href="/dashboard"
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition-colors"
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium rounded-lg transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
             Dashboard
