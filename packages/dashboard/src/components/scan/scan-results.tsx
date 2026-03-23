@@ -21,7 +21,10 @@ export function ScanResults({ result }: ScanResultsProps) {
 
   // Prefer a backend-provided total violating rules count when available (avoids
   // undercounting on free scans where the violations array is intentionally truncated).
-  const violatingRulesCount = result.totalViolatingRules ?? result.violations.length;
+  // Fall back to violations.length + hiddenViolations so free-scan totals are accurate.
+  const violatingRulesCount =
+    result.totalViolatingRules ??
+    (result.violations.length + (result.hiddenViolations ?? 0));
 
   const totalRules =
     result.passedRules + violatingRulesCount + (result.incompleteRules ?? 0);

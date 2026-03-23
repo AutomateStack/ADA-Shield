@@ -133,7 +133,7 @@ async function scanPage(url, options = {}) {
 function formatViolation(violation) {
   return {
     id: violation.id,
-    impact: violation.impact,
+    impact: violation.impact ?? 'minor',
     description: violation.description,
     help: violation.help,
     helpUrl: violation.helpUrl,

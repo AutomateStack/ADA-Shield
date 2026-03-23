@@ -78,7 +78,24 @@ async function updateNotificationPrefs(userId, prefs) {
         .select()
         .single();
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        // Handle concurrent first-time updates: if another request inserted the row
+        // between our UPDATE (no-match) and this INSERT, we get a unique-constraint
+        // violation (Postgres code 23505). Retry with an UPDATE in that case.
+        if (insertError.code === '23505') {
+          const { data: updatedAfterInsert, error: retryError } = await supabase
+            .from('notification_preferences')
+            .update(updatePayload)
+            .eq('user_id', userId)
+            .select()
+            .single();
+
+          if (retryError) throw retryError;
+          logger.info('Notification prefs updated after concurrent insert', { userId });
+          return updatedAfterInsert;
+        }
+        throw insertError;
+      }
       logger.info('Notification prefs created', { userId });
       return inserted;
     }
