@@ -115,16 +115,27 @@ async function getMonitoredSites() {
     if (error) throw error;
     if (!sites || sites.length === 0) return [];
 
-    // Look up emails from the public profiles table instead
+    // Look up emails from the public profiles table instead.
+    // Gracefully skip if the table doesn't exist yet (migration not yet run).
     const userIds = [...new Set(sites.map((s) => s.user_id).filter(Boolean))];
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('id, email')
-      .in('id', userIds);
+    let emailMap = {};
+    try {
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id, email')
+        .in('id', userIds);
 
-    const emailMap = {};
-    if (profiles) {
-      for (const p of profiles) emailMap[p.id] = p.email;
+      if (!profilesError && profiles) {
+        for (const p of profiles) emailMap[p.id] = p.email;
+      } else if (profilesError) {
+        logger.warn('Could not fetch profiles for weekly scan emails — proceeding without emails', {
+          error: profilesError.message,
+        });
+      }
+    } catch (profileErr) {
+      logger.warn('profiles table query failed — proceeding without emails', {
+        error: profileErr.message,
+      });
     }
 
     // Attach user email as site.users.email (keeps existing callers compatible)
