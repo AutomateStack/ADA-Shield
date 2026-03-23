@@ -13,9 +13,14 @@ const { billingRoutes } = require('./routes/billing');
 const { notificationRoutes } = require('./routes/notifications');
 const { errorHandler } = require('./middleware/error-handler');
 const { createRateLimiter } = require('./middleware/rate-limiter');
+const { initScanQueue, initScanWorker } = require('./services/scan-queue');
 
 // Validate environment variables at startup
 validateConfig();
+
+// Initialise BullMQ queue and in-process worker (no-ops if REDIS_URL is absent)
+initScanQueue();
+initScanWorker();
 
 const app = express();
 const PORT = process.env.PORT || 4000;

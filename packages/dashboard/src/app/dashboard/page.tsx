@@ -23,6 +23,7 @@ interface Site {
 }
 
 interface LatestScan {
+  site_id: string;
   risk_score: number;
   total_violations: number;
   critical_count: number;
@@ -56,19 +57,21 @@ export default function DashboardPage() {
         if (sitesData) {
           setSites(sitesData);
 
-          // Fetch latest scan for each site
-          const scans: Record<string, LatestScan> = {};
-          for (const site of sitesData) {
-            const { data: scanData } = await supabase
-              .from('scan_results')
-              .select('risk_score, total_violations, critical_count, serious_count, passed_rules, scanned_at')
-              .eq('site_id', site.id)
-              .order('scanned_at', { ascending: false })
-              .limit(1)
-              .single();
+          // Fetch latest scan for every site in a single query, then map by site_id
+          const siteIds = sitesData.map((s) => s.id);
+          const { data: allScans } = await supabase
+            .from('scan_results')
+            .select('risk_score, total_violations, critical_count, serious_count, passed_rules, scanned_at, site_id')
+            .in('site_id', siteIds)
+            .order('scanned_at', { ascending: false });
 
-            if (scanData) {
-              scans[site.id] = scanData;
+          const scans: Record<string, LatestScan> = {};
+          if (allScans) {
+            for (const scan of allScans) {
+              // First occurrence per site_id is the most recent (ordered DESC)
+              if (!scans[scan.site_id]) {
+                scans[scan.site_id] = scan;
+              }
             }
           }
           setLatestScans(scans);
