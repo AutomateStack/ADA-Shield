@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Shield, LayoutDashboard, Globe, Settings, LogOut, CreditCard } from 'lucide-react';
+import { LayoutDashboard, Globe, Settings, LogOut, CreditCard } from 'lucide-react';
+import { ShieldLogo } from '@/components/ui/shield-logo';
 import { createSupabaseBrowser } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
 
@@ -34,8 +35,8 @@ export default function DashboardLayout({
       <aside className="hidden md:flex w-64 flex-col border-r border-white/10 bg-slate-950">
         {/* Logo */}
         <div className="px-6 py-5 border-b border-white/10">
-          <Link href="/" className="flex items-center gap-2">
-            <Shield className="h-6 w-6 text-brand-400" />
+          <Link href="/" className="flex items-center gap-2.5">
+            <ShieldLogo className="h-7 w-7" />
             <span className="text-lg font-bold text-white">ADA Shield</span>
           </Link>
         </div>
@@ -78,8 +79,8 @@ export default function DashboardLayout({
       <div className="flex-1 flex flex-col">
         {/* Mobile Header */}
         <header className="md:hidden border-b border-white/10 bg-slate-900/80 backdrop-blur px-4 py-3 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2">
-            <Shield className="h-6 w-6 text-brand-400" />
+          <Link href="/" className="flex items-center gap-2.5">
+            <ShieldLogo className="h-7 w-7" />
             <span className="text-lg font-bold text-white">ADA Shield</span>
           </Link>
           <button

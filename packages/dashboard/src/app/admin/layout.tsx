@@ -3,13 +3,13 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  Shield,
   LayoutDashboard,
   Activity,
   Users,
   CreditCard,
   ArrowLeft,
 } from 'lucide-react';
+import { ShieldLogo } from '@/components/ui/shield-logo';
 import { cn } from '@/lib/utils';
 
 const adminNavItems = [
@@ -32,8 +32,8 @@ export default function AdminLayout({
       <aside className="hidden md:flex w-64 flex-col border-r border-white/10 bg-slate-950">
         {/* Logo */}
         <div className="px-6 py-5 border-b border-white/10">
-          <Link href="/admin" className="flex items-center gap-2">
-            <Shield className="h-6 w-6 text-red-400" />
+          <Link href="/admin" className="flex items-center gap-2.5">
+            <ShieldLogo className="h-7 w-7" />
             <span className="text-lg font-bold text-white">Admin Portal</span>
           </Link>
         </div>
@@ -79,8 +79,8 @@ export default function AdminLayout({
       <div className="flex-1 flex flex-col">
         {/* Mobile Header */}
         <header className="md:hidden border-b border-white/10 bg-slate-900/80 backdrop-blur px-4 py-3 flex items-center justify-between">
-          <Link href="/admin" className="flex items-center gap-2">
-            <Shield className="h-6 w-6 text-red-400" />
+          <Link href="/admin" className="flex items-center gap-2.5">
+            <ShieldLogo className="h-7 w-7" />
             <span className="text-lg font-bold text-white">Admin</span>
           </Link>
         </header>
