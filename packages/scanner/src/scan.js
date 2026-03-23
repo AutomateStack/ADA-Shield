@@ -7,7 +7,8 @@ const { logger } = require('./utils/logger');
  * @type {import('puppeteer').LaunchOptions}
  */
 const DEFAULT_BROWSER_OPTIONS = {
-  headless: 'new',
+  headless: true,
+  executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
   args: [
     '--no-sandbox',
     '--disable-setuid-sandbox',
@@ -15,6 +16,10 @@ const DEFAULT_BROWSER_OPTIONS = {
     '--disable-gpu',
     '--disable-extensions',
     '--disable-background-networking',
+    '--single-process',
+    '--no-zygote',
+    '--disable-setuid-sandbox',
+    '--js-flags=--max-old-space-size=256',
   ],
   timeout: 30000,
 };

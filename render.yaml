@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     buildCommand: |
-      npm install --workspace=packages/scanner --workspace=packages/api
+      npm install
       npx puppeteer browsers install chrome
     startCommand: node packages/api/src/index.js
     envVars:
