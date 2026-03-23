@@ -1,0 +1,26 @@
+name: Weekly Monitor
+
+on:
+  schedule:
+    # Every Monday at 9:00 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+jobs:
+  trigger-scans:
+    name: Trigger Weekly Scans
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger weekly scan endpoint
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "${{ secrets.API_URL }}/api/internal/trigger-weekly-scan" \
+            -H "Content-Type: application/json" \
+            -H "x-internal-secret: ${{ secrets.INTERNAL_API_SECRET }}")
+          
+          if [ "$response" -ne 200 ]; then
+            echo "Weekly scan trigger failed with status $response"
+            exit 1
+          fi
+          
+          echo "Weekly scans triggered successfully"

@@ -1,0 +1,16 @@
+{
+  "name": "ADA Shield",
+  "short_name": "ADA Shield",
+  "description": "Website accessibility scanner and ADA lawsuit risk calculator",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

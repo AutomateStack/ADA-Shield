@@ -1,0 +1,22 @@
+{
+  "name": "@ada-shield/scanner",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Core Puppeteer + axe-core accessibility scanning engine",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "test": "node --test src/**/*.test.js",
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@axe-core/puppeteer": "^4.9.1",
+    "puppeteer": "^22.6.0",
+    "bullmq": "^5.7.0",
+    "winston": "^3.13.0",
+    "@supabase/supabase-js": "^2.43.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
