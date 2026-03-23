@@ -153,10 +153,35 @@ async function updateSiteLastScanned(siteId) {
   }
 }
 
+/**
+ * Gets a scan result by its public token (no auth required).
+ * Used for shareable public report links.
+ * @param {string} token - The public UUID token.
+ * @returns {Promise<object|null>} The scan result (without sensitive user data) or null.
+ */
+async function getPublicScanByToken(token) {
+  try {
+    const { data, error } = await supabase
+      .from('scan_results')
+      .select(
+        'id, url, scanned_at, risk_score, total_violations, critical_count, serious_count, moderate_count, minor_count, violations, passed_rules, incomplete_rules, scan_duration_ms, public_token'
+      )
+      .eq('public_token', token)
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw error;
+    return data || null;
+  } catch (error) {
+    logger.error('Failed to get public scan by token', { token, error: error.message });
+    throw error;
+  }
+}
+
 module.exports = {
   saveScanResult,
   getScanResults,
   getLatestScanResult,
   getScanById,
   updateSiteLastScanned,
+  getPublicScanByToken,
 };
