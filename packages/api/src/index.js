@@ -15,13 +15,6 @@ const { errorHandler } = require('./middleware/error-handler');
 const { createRateLimiter } = require('./middleware/rate-limiter');
 const { initScanQueue, initScanWorker } = require('./services/scan-queue');
 
-// Validate environment variables at startup
-validateConfig();
-
-// Initialise BullMQ queue and in-process worker (no-ops if REDIS_URL is absent)
-initScanQueue();
-initScanWorker();
-
 const app = express();
 const PORT = process.env.PORT || 4000;
 
@@ -68,11 +61,27 @@ app.use((_req, res) => {
 app.use(errorHandler);
 
 // ── Start Server ────────────────────────────────────────────────────
+// Bind the port FIRST so the process is always reachable, then validate
+// config and initialise optional services (queue, worker).
 app.listen(PORT, () => {
   logger.info(`ADA Shield API running on port ${PORT}`, {
     env: process.env.NODE_ENV,
     port: PORT,
   });
+
+  // Validate required env vars after binding — missing vars log an error
+  // but do NOT crash the process so the health check stays reachable.
+  try {
+    validateConfig();
+  } catch (err) {
+    logger.error('Configuration error — some features may be unavailable', {
+      error: err.message,
+    });
+  }
+
+  // Initialise BullMQ queue and in-process worker (no-ops if REDIS_URL is absent)
+  initScanQueue();
+  initScanWorker();
 });
 
 module.exports = { app };
