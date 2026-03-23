@@ -4,7 +4,7 @@ const { scanPage } = require('@ada-shield/scanner');
 const { calculateRiskScore } = require('@ada-shield/scanner');
 const { getUserSubscription, PLAN_LIMITS } = require('../db/subscriptions');
 const { getUserSites, getUserSiteById } = require('../db/sites');
-const { saveScanResult, updateSiteLastScanned } = require('../db/scans');
+const { saveScanResult, updateSiteLastScanned, getPublicScanByToken } = require('../db/scans');
 const { createRateLimiter } = require('../middleware/rate-limiter');
 const { authenticate } = require('../middleware/auth');
 const { logger } = require('../utils/logger');
@@ -52,23 +52,27 @@ router.post(
       const riskResult = calculateRiskScore(scanResult.violations);
 
       // Persist full scan result to DB (fire-and-forget — don't block the response)
-      saveScanResult({
-        url: scanResult.url,
-        siteId: null,
-        userId: null,
-        riskScore: riskResult.score,
-        totalViolations: scanResult.totalViolations,
-        criticalCount: scanResult.criticalCount,
-        seriousCount: scanResult.seriousCount,
-        moderateCount: scanResult.moderateCount,
-        minorCount: scanResult.minorCount,
-        violations: scanResult.violations,
-        passedRules: scanResult.passedRules,
-        incompleteRules: scanResult.incompleteRules || 0,
-        scanDurationMs: scanResult.scanDurationMs,
-      }).catch((err) =>
-        logger.error('Failed to persist free scan result', { url, error: err.message })
-      );
+      let publicToken = null;
+      try {
+        const saved = await saveScanResult({
+          url: scanResult.url,
+          siteId: null,
+          userId: null,
+          riskScore: riskResult.score,
+          totalViolations: scanResult.totalViolations,
+          criticalCount: scanResult.criticalCount,
+          seriousCount: scanResult.seriousCount,
+          moderateCount: scanResult.moderateCount,
+          minorCount: scanResult.minorCount,
+          violations: scanResult.violations,
+          passedRules: scanResult.passedRules,
+          incompleteRules: scanResult.incompleteRules || 0,
+          scanDurationMs: scanResult.scanDurationMs,
+        });
+        publicToken = saved?.public_token || null;
+      } catch (err) {
+        logger.error('Failed to persist free scan result', { url: scanResult.url, error: err.message });
+      }
 
       // Free scan: return risk score + first 3 violations only
       const limitedViolations = scanResult.violations.slice(0, 3);
@@ -90,6 +94,7 @@ router.post(
         passedRules: scanResult.passedRules,
         scanDurationMs: scanResult.scanDurationMs,
         isFreeScan: true,
+        publicToken,
         message:
           hiddenCount > 0
             ? `${hiddenCount} more violations found — sign up to see all`
@@ -260,6 +265,18 @@ router.get(
     }
   }
 );
+
+// Public shareable report — no auth required
+router.get('/report/:token', async (req, res, next) => {
+  try {
+    const { token } = req.params;
+    const scan = await getPublicScanByToken(token);
+    if (!scan) return res.status(404).json({ error: 'Report not found' });
+    return res.json(scan);
+  } catch (error) {
+    next(error);
+  }
+});
 
 const scanRoutes = router;
 module.exports = { scanRoutes };

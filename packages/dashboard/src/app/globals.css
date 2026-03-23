@@ -58,3 +58,55 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.25);
 }
+
+/* ── Print / PDF styles ────────────────────────────────────────── */
+@media print {
+  /* White background for the whole page */
+  html, body {
+    background: white !important;
+    color: #0f172a !important;
+    font-size: 13px;
+  }
+
+  /* Hide nav, footer, action buttons, upsell banners */
+  header,
+  footer,
+  nav,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* Force-show print-only elements */
+  .print\:flex { display: flex !important; }
+  .print\:block { display: block !important; }
+
+  /* Remove dark gradient backgrounds  */
+  .bg-gradient-to-b,
+  .bg-slate-900,
+  .bg-slate-800 {
+    background: white !important;
+  }
+
+  /* Dark cards → light */
+  [class*="bg-white\/5"],
+  [class*="bg-white\/10"] {
+    background: #f8fafc !important;
+    border-color: #e2e8f0 !important;
+  }
+
+  /* Text adjustments */
+  [class*="text-white"] { color: #0f172a !important; }
+  [class*="text-slate-3"] { color: #334155 !important; }
+  [class*="text-slate-4"] { color: #475569 !important; }
+
+  /* Avoid page breaks inside violation cards */
+  .violation-card, article {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  a[href]::after {
+    content: none;
+  }
+}
+

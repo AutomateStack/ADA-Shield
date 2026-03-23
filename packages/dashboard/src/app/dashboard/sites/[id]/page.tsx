@@ -12,10 +12,15 @@ import {
   CheckCircle,
   Clock,
   ExternalLink,
+  Download,
+  Share2,
 } from 'lucide-react';
 import { createSupabaseBrowser } from '@/lib/supabase/client';
 import { RiskGauge } from '@/components/scan/risk-gauge';
 import { ViolationCard } from '@/components/scan/violation-card';
+import { RiskTrendChart } from '@/components/scan/risk-trend-chart';
+import { ScanDiffBadge } from '@/components/scan/scan-diff-badge';
+import { ComplianceBadge } from '@/components/ui/compliance-badge';
 
 interface Site {
   id: string;
@@ -36,6 +41,7 @@ interface ScanResult {
   passed_rules: number;
   scan_duration_ms: number;
   scanned_at: string;
+  public_token?: string;
 }
 
 export default function SiteDetailPage() {
@@ -48,6 +54,15 @@ export default function SiteDetailPage() {
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [selectedScan, setSelectedScan] = useState<ScanResult | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handlePrint = () => window.print();
+  const handleShare = (token: string) => {
+    const url = `${window.location.origin}/report/${token}`;
+    navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -240,23 +255,43 @@ export default function SiteDetailPage() {
             </div>
           </div>
 
-          <button
-            onClick={handleScan}
-            disabled={scanning}
-            className="flex items-center gap-2 px-5 py-2.5 bg-brand-600 hover:bg-brand-700 disabled:bg-brand-800 text-white text-sm font-semibold rounded-lg transition-colors"
-          >
-            {scanning ? (
+          <div className="flex items-center gap-2">
+            {selectedScan?.public_token && (
               <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Scanning...
-              </>
-            ) : (
-              <>
-                <RefreshCw className="h-4 w-4" />
-                Run Scan
+                <button
+                  onClick={() => handleShare(selectedScan.public_token!)}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors"
+                >
+                  <Share2 className="h-4 w-4" />
+                  {copied ? 'Copied!' : 'Share'}
+                </button>
+                <button
+                  onClick={handlePrint}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors"
+                >
+                  <Download className="h-4 w-4" />
+                  PDF
+                </button>
               </>
             )}
-          </button>
+            <button
+              onClick={handleScan}
+              disabled={scanning}
+              className="flex items-center gap-2 px-5 py-2.5 bg-brand-600 hover:bg-brand-700 disabled:bg-brand-800 text-white text-sm font-semibold rounded-lg transition-colors"
+            >
+              {scanning ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Scanning...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4" />
+                  Run Scan
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -316,6 +351,14 @@ export default function SiteDetailPage() {
             </div>
           </div>
 
+          {/* Trend chart + diff badge */}
+          {scans.length >= 2 && (
+            <div className="mb-6 space-y-4">
+              <RiskTrendChart scans={scans} />
+              <ScanDiffBadge current={scans[0]} previous={scans[1]} />
+            </div>
+          )}
+
           {/* Scan History Selector */}
           {scans.length > 1 && (
             <div className="mb-6">
@@ -356,6 +399,13 @@ export default function SiteDetailPage() {
               </div>
             )}
           </div>
+
+          {/* Compliance badge for low-risk sites */}
+          {scans[0]?.risk_score <= 29 && site && (
+            <div className="mt-6">
+              <ComplianceBadge riskScore={scans[0].risk_score} siteUrl={site.url} />
+            </div>
+          )}
         </>
       )}
     </div>
