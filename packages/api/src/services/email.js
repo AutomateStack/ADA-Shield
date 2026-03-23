@@ -17,6 +17,17 @@ function escapeHtml(value) {
 }
 
 /**
+ * Sanitizes a string for use in an email subject header.
+ * Strips CR/LF characters to prevent header injection attacks and
+ * truncates to a safe length.
+ * @param {any} value
+ * @returns {string}
+ */
+function sanitizeSubject(value) {
+  return String(value ?? '').replace(/[\r\n\t]/g, '').slice(0, 200);
+}
+
+/**
  * Creates a Resend client. Returns null if API key is not configured.
  */
 function getResendClient() {
@@ -41,13 +52,14 @@ async function sendScanCompleteEmail({ to, siteName, siteUrl, riskScore, riskLev
 
   const riskColor = riskScore >= 70 ? '#ef4444' : riskScore >= 40 ? '#f59e0b' : '#22c55e';
   const riskEmoji = riskScore >= 70 ? '🔴' : riskScore >= 40 ? '🟡' : '🟢';
+  const subjectSiteName = sanitizeSubject(siteName);
   const safeSiteName = escapeHtml(siteName);
 
   try {
     const { data, error } = await resend.emails.send({
       from: EMAIL_FROM,
       to,
-      subject: `${riskEmoji} Scan Complete: ${safeSiteName} — Risk Score ${riskScore}/100`,
+      subject: `${riskEmoji} Scan Complete: ${subjectSiteName} — Risk Score ${riskScore}/100`,
       html: `
 <!DOCTYPE html>
 <html>
@@ -118,12 +130,13 @@ async function sendRiskAlertEmail({ to, siteName, siteUrl, riskScore, criticalCo
 
   const safeSiteName = escapeHtml(siteName);
   const safeSiteUrl = escapeHtml(siteUrl);
+  const subjectSiteName = sanitizeSubject(siteName);
 
   try {
     const { data, error } = await resend.emails.send({
       from: EMAIL_FROM,
       to,
-      subject: `🚨 High Risk Alert: ${safeSiteName} scored ${riskScore}/100`,
+      subject: `🚨 High Risk Alert: ${subjectSiteName} scored ${riskScore}/100`,
       html: `
 <!DOCTYPE html>
 <html>
