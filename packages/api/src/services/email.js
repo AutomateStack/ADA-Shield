@@ -2,6 +2,32 @@ const { Resend } = require('resend');
 const { logger } = require('../utils/logger');
 
 /**
+ * Escapes a string for safe interpolation into HTML.
+ * Prevents HTML injection via user-controlled fields (e.g. siteName, siteUrl).
+ * @param {any} value
+ * @returns {string}
+ */
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
+}
+
+/**
+ * Sanitizes a string for use in an email subject header.
+ * Strips CR/LF characters to prevent header injection attacks and
+ * truncates to a safe length.
+ * @param {any} value
+ * @returns {string}
+ */
+function sanitizeSubject(value) {
+  return String(value ?? '').replace(/[\r\n\t]/g, '').slice(0, 200);
+}
+
+/**
  * Creates a Resend client. Returns null if API key is not configured.
  */
 function getResendClient() {
@@ -26,12 +52,14 @@ async function sendScanCompleteEmail({ to, siteName, siteUrl, riskScore, riskLev
 
   const riskColor = riskScore >= 70 ? '#ef4444' : riskScore >= 40 ? '#f59e0b' : '#22c55e';
   const riskEmoji = riskScore >= 70 ? '🔴' : riskScore >= 40 ? '🟡' : '🟢';
+  const subjectSiteName = sanitizeSubject(siteName);
+  const safeSiteName = escapeHtml(siteName);
 
   try {
     const { data, error } = await resend.emails.send({
       from: EMAIL_FROM,
       to,
-      subject: `${riskEmoji} Scan Complete: ${siteName} — Risk Score ${riskScore}/100`,
+      subject: `${riskEmoji} Scan Complete: ${subjectSiteName} — Risk Score ${riskScore}/100`,
       html: `
 <!DOCTYPE html>
 <html>
@@ -43,7 +71,7 @@ async function sendScanCompleteEmail({ to, siteName, siteUrl, riskScore, riskLev
     </div>
     <div style="background:#1e293b;border-radius:12px;padding:32px;border:1px solid rgba(255,255,255,0.1);">
       <h2 style="color:#fff;font-size:20px;margin:0 0 8px;">Scan Complete</h2>
-      <p style="color:#94a3b8;margin:0 0 24px;">Your accessibility scan for <strong style="color:#fff;">${siteName}</strong> has finished.</p>
+      <p style="color:#94a3b8;margin:0 0 24px;">Your accessibility scan for <strong style="color:#fff;">${safeSiteName}</strong> has finished.</p>
       
       <div style="text-align:center;padding:24px;background:#0f172a;border-radius:8px;margin-bottom:24px;">
         <div style="font-size:48px;font-weight:bold;color:${riskColor};">${riskScore}</div>
@@ -100,11 +128,15 @@ async function sendRiskAlertEmail({ to, siteName, siteUrl, riskScore, criticalCo
     return null;
   }
 
+  const safeSiteName = escapeHtml(siteName);
+  const safeSiteUrl = escapeHtml(siteUrl);
+  const subjectSiteName = sanitizeSubject(siteName);
+
   try {
     const { data, error } = await resend.emails.send({
       from: EMAIL_FROM,
       to,
-      subject: `🚨 High Risk Alert: ${siteName} scored ${riskScore}/100`,
+      subject: `🚨 High Risk Alert: ${subjectSiteName} scored ${riskScore}/100`,
       html: `
 <!DOCTYPE html>
 <html>
@@ -120,7 +152,7 @@ async function sendRiskAlertEmail({ to, siteName, siteUrl, riskScore, criticalCo
         <h2 style="color:#ef4444;font-size:20px;margin:0;">High Lawsuit Risk Detected</h2>
       </div>
       <p style="color:#94a3b8;margin:0 0 24px;">
-        Your site <strong style="color:#fff;">${siteName}</strong> (${siteUrl}) has a risk score of 
+        Your site <strong style="color:#fff;">${safeSiteName}</strong> (${safeSiteUrl}) has a risk score of 
         <strong style="color:#ef4444;">${riskScore}/100</strong>, which indicates a high probability of ADA-related legal action.
       </p>
       
@@ -170,9 +202,10 @@ async function sendWeeklySummaryEmail({ to, sites, dashboardUrl }) {
   const siteRows = sites
     .map((s) => {
       const riskColor = s.riskScore >= 70 ? '#ef4444' : s.riskScore >= 40 ? '#f59e0b' : '#22c55e';
+      const safeName = escapeHtml(s.name);
       return `
         <tr>
-          <td style="padding:12px;border-bottom:1px solid rgba(255,255,255,0.05);color:#fff;">${s.name}</td>
+          <td style="padding:12px;border-bottom:1px solid rgba(255,255,255,0.05);color:#fff;">${safeName}</td>
           <td style="padding:12px;border-bottom:1px solid rgba(255,255,255,0.05);text-align:center;">
             <span style="color:${riskColor};font-weight:bold;">${s.riskScore}</span>
           </td>
