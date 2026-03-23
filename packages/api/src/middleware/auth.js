@@ -17,7 +17,7 @@ async function authenticate(req, res, next) {
 
     const supabase = createClient(
       process.env.SUPABASE_URL,
-      process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY,
+      process.env.SUPABASE_ANON_KEY,
       {
         global: { headers: { Authorization: `Bearer ${token}` } },
         auth: { autoRefreshToken: false, persistSession: false },
@@ -52,7 +52,7 @@ async function optionalAuth(req, _res, next) {
 
     const supabase = createClient(
       process.env.SUPABASE_URL,
-      process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY,
+      process.env.SUPABASE_ANON_KEY,
       {
         global: { headers: { Authorization: `Bearer ${token}` } },
         auth: { autoRefreshToken: false, persistSession: false },

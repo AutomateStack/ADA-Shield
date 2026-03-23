@@ -33,17 +33,23 @@ async function getNotificationPrefs(userId) {
 
 /**
  * Updates notification preferences for a user (upsert).
+ * Supports partial updates: omitted fields keep their existing values.
  */
 async function updateNotificationPrefs(userId, prefs) {
   try {
+    const incomingPrefs = prefs || {};
+
+    // Fetch current preferences to merge with, so omitted fields are not reset
+    const currentPrefs = await getNotificationPrefs(userId);
+
     const { data, error } = await supabase
       .from('notification_preferences')
       .upsert(
         {
           user_id: userId,
-          scan_complete: prefs.scan_complete ?? true,
-          risk_alerts: prefs.risk_alerts ?? true,
-          weekly_summary: prefs.weekly_summary ?? true,
+          scan_complete: incomingPrefs.scan_complete ?? currentPrefs.scan_complete,
+          risk_alerts: incomingPrefs.risk_alerts ?? currentPrefs.risk_alerts,
+          weekly_summary: incomingPrefs.weekly_summary ?? currentPrefs.weekly_summary,
         },
         { onConflict: 'user_id' }
       )

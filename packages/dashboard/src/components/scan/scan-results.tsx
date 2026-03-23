@@ -19,6 +19,9 @@ export function ScanResults({ result }: ScanResultsProps) {
       ? result.violations
       : result.violations.filter((v: any) => v.impact === filter);
 
+  const totalRules =
+    result.passedRules + result.violations.length + (result.incompleteRules ?? 0);
+
   const filters: { value: ImpactFilter; label: string; count?: number }[] = [
     { value: 'all', label: 'All', count: result.violations.length },
     { value: 'critical', label: 'Critical', count: result.criticalCount },
@@ -71,7 +74,7 @@ export function ScanResults({ result }: ScanResultsProps) {
               icon={<CheckCircle className="h-5 w-5 text-green-400" />}
               sublabel={
                 <span className="text-xs text-slate-500">
-                  of {result.passedRules + result.totalViolations} total rules
+                  of {totalRules} total rules
                 </span>
               }
             />

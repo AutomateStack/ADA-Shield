@@ -105,12 +105,21 @@ async function handleCheckoutCompleted(stripe, session) {
  * Handles customer.subscription.updated — updates plan/status.
  */
 async function handleSubscriptionUpdated(subscription) {
+  const userId = subscription.metadata?.userId;
+  if (!userId) {
+    logger.error('Missing userId in subscription metadata — skipping upsert', {
+      stripeSubscriptionId: subscription.id,
+      stripeCustomerId: subscription.customer,
+    });
+    return;
+  }
+
   const priceId = subscription.items.data[0]?.price?.id;
   const plan = getPlanFromPriceId(priceId);
   const limits = PLAN_LIMITS[plan] || PLAN_LIMITS.starter;
 
   await upsertSubscription({
-    userId: subscription.metadata?.userId,
+    userId,
     stripeCustomerId: subscription.customer,
     stripeSubscriptionId: subscription.id,
     plan,
