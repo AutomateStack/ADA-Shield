@@ -44,10 +44,24 @@ export function Footer() {
             <h3 className="text-sm font-semibold text-white mb-3">Resources</h3>
             <ul className="space-y-2 text-sm">
               <li>
-                <span className="text-slate-500">WCAG 2.1 Guidelines</span>
+                <a
+                  href="https://www.w3.org/WAI/WCAG21/quickref/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-slate-400 hover:text-white transition-colors"
+                >
+                  WCAG 2.1 Guidelines
+                </a>
               </li>
               <li>
-                <span className="text-slate-500">ADA Compliance Guide</span>
+                <a
+                  href="https://www.ada.gov/resources/web-guidance/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-slate-400 hover:text-white transition-colors"
+                >
+                  ADA Compliance Guide
+                </a>
               </li>
               <li>
                 <span className="text-slate-500">Blog (Coming Soon)</span>
@@ -60,10 +74,14 @@ export function Footer() {
             <h3 className="text-sm font-semibold text-white mb-3">Legal</h3>
             <ul className="space-y-2 text-sm">
               <li>
-                <span className="text-slate-500">Privacy Policy</span>
+                <Link href="/privacy" className="text-slate-400 hover:text-white transition-colors">
+                  Privacy Policy
+                </Link>
               </li>
               <li>
-                <span className="text-slate-500">Terms of Service</span>
+                <Link href="/terms" className="text-slate-400 hover:text-white transition-colors">
+                  Terms of Service
+                </Link>
               </li>
             </ul>
           </div>
