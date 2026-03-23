@@ -50,7 +50,7 @@ export function ScanForm({ onResult, onError, onLoadingChange }: ScanFormProps) 
 
       if (!res.ok) {
         const data = await res.json();
-        throw new Error(data.error || 'Scan failed');
+        throw new Error(data.message || data.error || 'Scan failed');
       }
 
       const data = await res.json();

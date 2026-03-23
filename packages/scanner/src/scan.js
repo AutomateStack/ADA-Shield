@@ -8,7 +8,11 @@ const { logger } = require('./utils/logger');
  */
 const DEFAULT_BROWSER_OPTIONS = {
   headless: true,
-  executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+  // Let Puppeteer find Chrome via PUPPETEER_CACHE_DIR (set in render.yaml)
+  // Only override if PUPPETEER_EXECUTABLE_PATH is explicitly set
+  ...(process.env.PUPPETEER_EXECUTABLE_PATH && {
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+  }),
   args: [
     '--no-sandbox',
     '--disable-setuid-sandbox',
@@ -16,10 +20,8 @@ const DEFAULT_BROWSER_OPTIONS = {
     '--disable-gpu',
     '--disable-extensions',
     '--disable-background-networking',
-    '--single-process',
     '--no-zygote',
-    '--disable-setuid-sandbox',
-    '--js-flags=--max-old-space-size=256',
+    '--memory-pressure-off',
   ],
   timeout: 30000,
 };
