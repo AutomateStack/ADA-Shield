@@ -6,13 +6,22 @@ const { logger } = require('./utils/logger');
  * Default Puppeteer launch options
  * @type {import('puppeteer').LaunchOptions}
  */
+// Resolve Chrome executable: use explicit path env var first,
+// then fall back to puppeteer.executablePath() which honours PUPPETEER_CACHE_DIR.
+function getChromePath() {
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+  try {
+    return puppeteer.executablePath();
+  } catch {
+    return undefined;
+  }
+}
+
 const DEFAULT_BROWSER_OPTIONS = {
   headless: true,
-  // Let Puppeteer find Chrome via PUPPETEER_CACHE_DIR (set in render.yaml)
-  // Only override if PUPPETEER_EXECUTABLE_PATH is explicitly set
-  ...(process.env.PUPPETEER_EXECUTABLE_PATH && {
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-  }),
+  executablePath: getChromePath(),
   args: [
     '--no-sandbox',
     '--disable-setuid-sandbox',
