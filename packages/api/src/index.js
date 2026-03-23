@@ -11,6 +11,7 @@ const { webhookRoutes } = require('./routes/webhooks');
 const { internalRoutes } = require('./routes/internal');
 const { billingRoutes } = require('./routes/billing');
 const { notificationRoutes } = require('./routes/notifications');
+const { adminRoutes } = require('./routes/admin');
 const { errorHandler } = require('./middleware/error-handler');
 const { createRateLimiter } = require('./middleware/rate-limiter');
 const { initScanQueue, initScanWorker } = require('./services/scan-queue');
@@ -51,6 +52,7 @@ app.use('/api/scan', scanRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/internal', internalRoutes);
+app.use('/api/admin', adminRoutes);
 
 // ── 404 Handler ─────────────────────────────────────────────────────
 app.use((_req, res) => {
