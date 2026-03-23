@@ -13,14 +13,22 @@ jobs:
     steps:
       - name: Trigger weekly scan endpoint
         run: |
-          response=$(curl -s -o /dev/null -w "%{http_code}" \
+          # Capture both the response body and HTTP status code
+          body=$(curl -s --max-time 300 \
             -X POST "${{ secrets.API_URL }}/api/internal/trigger-weekly-scan" \
             -H "Content-Type: application/json" \
-            -H "x-internal-secret: ${{ secrets.INTERNAL_API_SECRET }}")
-          
-          if [ "$response" -ne 200 ]; then
-            echo "Weekly scan trigger failed with status $response"
+            -H "x-internal-secret: ${{ secrets.INTERNAL_API_SECRET }}" \
+            -w '\n__STATUS__%{http_code}')
+
+          status=$(echo "$body" | tail -1 | sed 's/__STATUS__//')
+          response_body=$(echo "$body" | sed '$d')
+
+          echo "HTTP Status: $status"
+          echo "Response: $response_body"
+
+          if [ "$status" -ne 200 ]; then
+            echo "Weekly scan trigger failed with status $status"
             exit 1
           fi
-          
+
           echo "Weekly scans triggered successfully"

@@ -106,13 +106,32 @@ async function getUserSiteById(siteId, userId) {
  */
 async function getMonitoredSites() {
   try {
-    const { data, error } = await supabase
+    // Fetch sites without joining auth.users (different schema — PostgREST can't resolve it)
+    const { data: sites, error } = await supabase
       .from('sites')
-      .select('*, users:user_id(email)')
+      .select('*')
       .eq('monitoring_active', true);
 
     if (error) throw error;
-    return data;
+    if (!sites || sites.length === 0) return [];
+
+    // Look up emails from the public profiles table instead
+    const userIds = [...new Set(sites.map((s) => s.user_id).filter(Boolean))];
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, email')
+      .in('id', userIds);
+
+    const emailMap = {};
+    if (profiles) {
+      for (const p of profiles) emailMap[p.id] = p.email;
+    }
+
+    // Attach user email as site.users.email (keeps existing callers compatible)
+    return sites.map((site) => ({
+      ...site,
+      users: { email: emailMap[site.user_id] || null },
+    }));
   } catch (error) {
     logger.error('Failed to get monitored sites', {
       error: error.message,
