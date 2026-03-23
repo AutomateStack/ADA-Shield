@@ -143,7 +143,21 @@ router.post('/trigger-weekly-scan', async (req, res, next) => {
       results,
     });
   } catch (error) {
-    next(error);
+    // This route is internal/protected — keep detailed info in logs,
+    // but avoid leaking internal error messages in production responses.
+    const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+    logger.error('Weekly scan trigger error', { error: error.message, stack: error.stack });
+
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(500).json({
+        error: 'Internal server error',
+      });
+    }
+
+    return res.status(statusCode).json({
+      error: error.message || 'Internal server error',
+      hint: 'Check server logs for full stack trace',
+    });
   }
 });
 

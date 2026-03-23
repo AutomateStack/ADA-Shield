@@ -106,13 +106,46 @@ async function getUserSiteById(siteId, userId) {
  */
 async function getMonitoredSites() {
   try {
-    const { data, error } = await supabase
+    // Fetch sites without joining auth.users (different schema — PostgREST can't resolve it)
+    const { data: sites, error } = await supabase
       .from('sites')
-      .select('*, users:user_id(email)')
+      .select('*')
       .eq('monitoring_active', true);
 
     if (error) throw error;
-    return data;
+    if (!sites || sites.length === 0) return [];
+
+    // Look up emails from the public profiles table instead.
+    // Gracefully skip if the table doesn't exist yet (migration not yet run).
+    const userIds = [...new Set(sites.map((s) => s.user_id).filter(Boolean))];
+    let emailMap = {};
+    if (userIds.length === 0) {
+      return sites.map((site) => ({ ...site, users: { email: null } }));
+    }
+    try {
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id, email')
+        .in('id', userIds);
+
+      if (!profilesError && profiles) {
+        for (const p of profiles) emailMap[p.id] = p.email;
+      } else if (profilesError) {
+        logger.warn('Could not fetch profiles for weekly scan emails — proceeding without emails', {
+          error: profilesError.message,
+        });
+      }
+    } catch (profileErr) {
+      logger.warn('profiles table query failed — proceeding without emails', {
+        error: profileErr.message,
+      });
+    }
+
+    // Attach user email as site.users.email (keeps existing callers compatible)
+    return sites.map((site) => ({
+      ...site,
+      users: { email: emailMap[site.user_id] || null },
+    }));
   } catch (error) {
     logger.error('Failed to get monitored sites', {
       error: error.message,
