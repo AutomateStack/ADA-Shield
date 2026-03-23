@@ -76,22 +76,11 @@ router.post(
             : undefined,
       });
     } catch (error) {
-      // Surface browser/scanner errors as 503 with a helpful message
-      // rather than letting them become a generic 500
-      const isBrowserError =
-        error.message?.includes('Failed to launch') ||
-        error.message?.includes('Navigation timeout') ||
-        error.message?.includes('net::') ||
-        error.message?.includes('Protocol error');
-
-      if (isBrowserError) {
-        logger.error('Scanner error on free scan', { url: req.body?.url, error: error.message });
-        return res.status(503).json({
-          error: 'Scan failed',
-          message: 'Unable to scan this page. The site may be blocking automated access, or the URL is unreachable.',
-        });
-      }
-      next(error);
+      logger.error('Free scan failed', { url: req.body?.url, error: error.message, stack: error.stack });
+      return res.status(503).json({
+        error: 'Scan failed',
+        message: error.message || 'Unable to complete the scan. Please try again.',
+      });
     }
   }
 );
