@@ -1,8 +1,0 @@
-{
-  "installCommand": "cd ../.. && npm ci",
-  "buildCommand": "npx next build",
-  "outputDirectory": ".next",
-  "framework": "nextjs",
-  "devCommand": "npx next dev",
-  "ignoreCommand": "git diff HEAD^ HEAD --quiet -- . ../../packages/scanner/ ../../package.json ../../package-lock.json"
-}
