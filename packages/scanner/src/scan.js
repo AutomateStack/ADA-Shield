@@ -1,17 +1,38 @@
 const puppeteer = require('puppeteer');
 const { AxePuppeteer } = require('@axe-core/puppeteer');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 const { logger } = require('./utils/logger');
 
-/**
- * Default Puppeteer launch options
- * @type {import('puppeteer').LaunchOptions}
- */
-// Resolve Chrome executable path at call-time (not module load) so that
-// PUPPETEER_CACHE_DIR is guaranteed to be set when the lookup runs.
+// Resolve Chrome executable path by searching known cache locations.
+// This handles cases where PUPPETEER_CACHE_DIR env var is set at build time
+// but not at runtime (e.g. Render free tier with render.yaml env vars not
+// auto-applied to existing services).
 function getChromePath() {
   if (process.env.PUPPETEER_EXECUTABLE_PATH) {
     return process.env.PUPPETEER_EXECUTABLE_PATH;
   }
+
+  // Search these cache dirs in order of preference
+  const cacheDirs = [
+    process.env.PUPPETEER_CACHE_DIR,
+    '/opt/render/project/src/.cache/puppeteer', // Render: project-internal install
+    path.join(os.homedir(), '.cache', 'puppeteer'), // default Linux/Mac
+  ].filter(Boolean);
+
+  for (const cacheDir of cacheDirs) {
+    const chromeCacheDir = path.join(cacheDir, 'chrome');
+    if (!fs.existsSync(chromeCacheDir)) continue;
+    try {
+      const versions = fs.readdirSync(chromeCacheDir);
+      for (const version of versions) {
+        const chromeBin = path.join(chromeCacheDir, version, 'chrome-linux64', 'chrome');
+        if (fs.existsSync(chromeBin)) return chromeBin;
+      }
+    } catch (e) { /* keep searching */ }
+  }
+
   try {
     return puppeteer.executablePath();
   } catch (err) {
