@@ -192,8 +192,8 @@ The lawsuit risk score (0–100) uses weighted scoring:
 | Plan | Price | Sites | Pages | Monitoring |
 |---|---|---|---|---|
 | **Free** | $0 | — | 3 violations shown | No |
-| **Starter** | $29/mo | 1 | 100 | Weekly |
-| **Business** | $79/mo | 5 | 500 | Weekly |
+| **Starter** | $29/mo | 1 | 10 | Weekly |
+| **Business** | $79/mo | 5 | 50 | Weekly |
 | **Agency** | $199/mo | 20 | Unlimited | Daily |
 
 ---

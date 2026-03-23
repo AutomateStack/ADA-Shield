@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   stripe_customer_id TEXT UNIQUE,
   stripe_subscription_id TEXT UNIQUE,
   plan TEXT CHECK (plan IN ('starter', 'business', 'agency')),
-  status TEXT CHECK (status IN ('active', 'canceled', 'past_due', 'trialing')),
+  status TEXT CHECK (status IN ('active', 'canceled', 'past_due', 'trialing', 'incomplete', 'incomplete_expired', 'unpaid', 'paused')),
   pages_limit INTEGER,
   sites_limit INTEGER,
   current_period_end TIMESTAMPTZ,

@@ -115,7 +115,7 @@ export default function SiteDetailPage() {
       const result = await res.json();
 
       // Save to database
-      const { data: saved } = await supabase
+      const { data: saved, error: insertError } = await supabase
         .from('scan_results')
         .insert({
           site_id: siteId,
@@ -134,16 +134,20 @@ export default function SiteDetailPage() {
         .select()
         .single();
 
+      if (insertError) throw new Error(insertError.message);
+
       if (saved) {
         setScans([saved, ...scans]);
         setSelectedScan(saved);
       }
 
       // Update last_scanned_at
-      await supabase
+      const { error: updateError } = await supabase
         .from('sites')
         .update({ last_scanned_at: new Date().toISOString() })
         .eq('id', siteId);
+
+      if (updateError) throw new Error(updateError.message);
     } catch (err: any) {
       alert(err.message || 'Scan failed');
     } finally {
