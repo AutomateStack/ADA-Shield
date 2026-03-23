@@ -85,7 +85,7 @@ async function getMonitoredSites() {
   try {
     const { data, error } = await supabase
       .from('sites')
-      .select('*, users:user_id(email)')
+      .select('*')
       .eq('monitoring_active', true);
 
     if (error) throw error;

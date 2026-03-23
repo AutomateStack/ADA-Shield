@@ -64,12 +64,12 @@ function calculateRiskScore(violations) {
         if (ruleId === 'html-has-lang') {
           const points = rule[impact] || rule.serious;
           totalPoints += points;
-          breakdown.lawsuitTriggers[ruleId] = points;
+          breakdown.lawsuitTriggers[ruleId] = (breakdown.lawsuitTriggers[ruleId] || 0) + points;
         } else {
           const pointsPer = rule[impact] || rule.serious;
           const points = pointsPer * nodeCount;
           totalPoints += points;
-          breakdown.lawsuitTriggers[ruleId] = points;
+          breakdown.lawsuitTriggers[ruleId] = (breakdown.lawsuitTriggers[ruleId] || 0) + points;
         }
       } else {
         const pointsPer = GENERAL_IMPACT_POINTS[impact] || GENERAL_IMPACT_POINTS.minor;

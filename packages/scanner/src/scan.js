@@ -166,7 +166,12 @@ function generateFix(ruleId, node) {
   switch (ruleId) {
     case 'image-alt': {
       if (html.includes('<img')) {
-        fixedHtml = html.replace(/<img/, '<img alt="Descriptive text here"');
+        if (/alt\s*=/.test(html)) {
+          // Replace empty alt with descriptive placeholder
+          fixedHtml = html.replace(/alt\s*=\s*"[^"]*"/, 'alt="Descriptive text here"');
+        } else {
+          fixedHtml = html.replace(/<img/, '<img alt="Descriptive text here"');
+        }
         explanation =
           'Add a descriptive alt attribute that conveys the purpose of the image.';
       }

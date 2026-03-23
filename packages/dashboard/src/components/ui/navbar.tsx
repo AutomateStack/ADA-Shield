@@ -27,20 +27,23 @@ export function Navbar() {
 
         {/* Desktop Nav */}
         <div className="hidden md:flex items-center gap-8">
-          {links.map((link) => (
-            <a
-              key={link.href}
-              href={link.href}
-              className={cn(
-                'text-sm font-medium transition-colors',
-                pathname === link.href
-                  ? 'text-white'
-                  : 'text-slate-400 hover:text-white'
-              )}
-            >
-              {link.label}
-            </a>
-          ))}
+          {links.map((link) => {
+            const isActive = link.href.startsWith('/#')
+              ? pathname === '/'
+              : pathname === link.href;
+            return (
+              <a
+                key={link.href}
+                href={link.href}
+                className={cn(
+                  'text-sm font-medium transition-colors',
+                  isActive ? 'text-white' : 'text-slate-400 hover:text-white'
+                )}
+              >
+                {link.label}
+              </a>
+            );
+          })}
         </div>
 
         {/* Auth Buttons */}

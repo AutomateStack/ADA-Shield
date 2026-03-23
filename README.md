@@ -156,11 +156,10 @@ curl -X POST http://localhost:4000/api/scan/free \
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
 | `POST` | `/api/scan/free` | None | Free scan (3 violations shown, 10/hr rate limit) |
-| `POST` | `/api/scan/run` | Bearer | Authenticated scan (queued via BullMQ) |
-| `GET` | `/api/scan/status/:jobId` | Optional | Check queued scan status |
+| `POST` | `/api/scan/run` | Bearer | Authenticated scan (runs synchronously) |
 | `GET` | `/api/scan/results/:siteId` | Bearer | Get scan history for a site |
 | `POST` | `/api/webhooks/stripe` | Stripe sig | Stripe webhook handler |
-| `POST` | `/api/internal/weekly-scan` | API secret | Trigger weekly monitoring |
+| `POST` | `/api/internal/trigger-weekly-scan` | API secret | Trigger weekly monitoring (internal/cron) |
 | `GET` | `/health` | None | Health check |
 
 ---
@@ -192,8 +191,8 @@ The lawsuit risk score (0–100) uses weighted scoring:
 | Plan | Price | Sites | Pages | Monitoring |
 |---|---|---|---|---|
 | **Free** | $0 | — | 3 violations shown | No |
-| **Starter** | $29/mo | 1 | 100 | Weekly |
-| **Business** | $79/mo | 5 | 500 | Weekly |
+| **Starter** | $29/mo | 1 | 10 | Weekly |
+| **Business** | $79/mo | 5 | 50 | Weekly |
 | **Agency** | $199/mo | 20 | Unlimited | Daily |
 
 ---

@@ -1,4 +1,4 @@
-const { createScanWorker, createScanQueue } = require('./queue');
+const { createScanWorker } = require('./queue');
 const { validateConfig } = require('./utils/config');
 const { logger } = require('./utils/logger');
 

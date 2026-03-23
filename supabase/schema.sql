@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   stripe_customer_id TEXT UNIQUE,
   stripe_subscription_id TEXT UNIQUE,
   plan TEXT CHECK (plan IN ('starter', 'business', 'agency')),
-  status TEXT CHECK (status IN ('active', 'canceled', 'past_due', 'trialing')),
+  status TEXT CHECK (status IN ('active', 'canceled', 'past_due', 'trialing', 'incomplete', 'incomplete_expired', 'unpaid', 'paused')),
   pages_limit INTEGER,
   sites_limit INTEGER,
   current_period_end TIMESTAMPTZ,
@@ -100,3 +100,19 @@ CREATE INDEX IF NOT EXISTS idx_scan_results_scanned_at ON scan_results(scanned_a
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sites_monitoring ON sites(monitoring_active) WHERE monitoring_active = true;
 CREATE INDEX IF NOT EXISTS idx_notification_prefs_user_id ON notification_preferences(user_id);
+
+-- ═══════════════════════════════════════════════════════════════════
+-- Auto-update updated_at on notification_preferences
+-- ═══════════════════════════════════════════════════════════════════
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER update_notification_preferences_updated_at
+  BEFORE UPDATE ON notification_preferences
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();

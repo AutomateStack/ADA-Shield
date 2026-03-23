@@ -71,7 +71,7 @@ export function ScanResults({ result }: ScanResultsProps) {
               icon={<CheckCircle className="h-5 w-5 text-green-400" />}
               sublabel={
                 <span className="text-xs text-slate-500">
-                  of {result.passedRules + result.totalViolations} total rules
+                  of {result.passedRules + result.violations.length} total rules
                 </span>
               }
             />

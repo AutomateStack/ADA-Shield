@@ -3,11 +3,10 @@ const { z } = require('zod');
 const { scanPage } = require('@ada-shield/scanner');
 const { calculateRiskScore } = require('@ada-shield/scanner');
 const { saveScanResult, updateSiteLastScanned } = require('../db/scans');
-const { getUserSubscription, PLAN_LIMITS } = require('../db/subscriptions');
 const { getUserSites } = require('../db/sites');
 const { getNotificationPrefs } = require('../db/notifications');
 const { createRateLimiter } = require('../middleware/rate-limiter');
-const { authenticate, optionalAuth } = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
 const { sendScanCompleteEmail, sendRiskAlertEmail } = require('../services/email');
 const { logger } = require('../utils/logger');
 
@@ -100,20 +99,8 @@ router.post(
       const { siteId } = parsed.data;
       const userId = req.user.id;
 
-      // Check subscription and enforce plan limits
-      const subscription = await getUserSubscription(userId);
-      const plan = subscription?.plan || 'free';
-      const limits = PLAN_LIMITS[plan] || { pagesLimit: 1, sitesLimit: 1 };
-
-      // Check site limit
+      // Load user sites to validate ownership of the requested site
       const userSites = await getUserSites(userId);
-      if (userSites.length > limits.sitesLimit) {
-        return res.status(403).json({
-          error: 'Site limit reached',
-          message: `Your ${plan} plan allows ${limits.sitesLimit} site(s). Upgrade to add more.`,
-          upgradeRequired: true,
-        });
-      }
 
       // Find the requested site
       const site = userSites.find((s) => s.id === siteId);

@@ -56,21 +56,27 @@ export default function DashboardPage() {
         if (sitesData) {
           setSites(sitesData);
 
-          // Fetch latest scan for each site
+          // Fetch latest scan for each site in a single query, then reduce client-side
+          const siteIds = sitesData.map((s) => s.id);
           const scans: Record<string, LatestScan> = {};
-          for (const site of sitesData) {
-            const { data: scanData } = await supabase
-              .from('scan_results')
-              .select('risk_score, total_violations, critical_count, serious_count, passed_rules, scanned_at')
-              .eq('site_id', site.id)
-              .order('scanned_at', { ascending: false })
-              .limit(1)
-              .single();
 
-            if (scanData) {
-              scans[site.id] = scanData;
+          if (siteIds.length > 0) {
+            const { data: allScans } = await supabase
+              .from('scan_results')
+              .select('site_id, risk_score, total_violations, critical_count, serious_count, passed_rules, scanned_at')
+              .in('site_id', siteIds)
+              .order('scanned_at', { ascending: false });
+
+            if (allScans) {
+              for (const scan of allScans) {
+                // Keep only the most recent scan per site (results are ordered desc)
+                if (!scans[scan.site_id]) {
+                  scans[scan.site_id] = scan;
+                }
+              }
             }
           }
+
           setLatestScans(scans);
         }
       }

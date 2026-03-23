@@ -96,7 +96,8 @@ export default function SitesPage() {
     setDeleting(siteId);
     try {
       const supabase = createSupabaseBrowser();
-      await supabase.from('sites').delete().eq('id', siteId);
+      const { error: deleteError } = await supabase.from('sites').delete().eq('id', siteId);
+      if (deleteError) throw deleteError;
       setSites(sites.filter((s) => s.id !== siteId));
     } catch (err: any) {
       setError(err.message || 'Failed to delete site');

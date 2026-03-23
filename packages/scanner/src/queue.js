@@ -2,7 +2,6 @@ const { Queue, Worker } = require('bullmq');
 const { scanPage } = require('./scan');
 const { calculateRiskScore } = require('./risk-score');
 const { logger } = require('./utils/logger');
-const { validateConfig } = require('./utils/config');
 
 const QUEUE_NAME = 'accessibility-scans';
 

@@ -33,20 +33,26 @@ async function getNotificationPrefs(userId) {
 
 /**
  * Updates notification preferences for a user (upsert).
+ * Preserves existing values for fields not supplied in `prefs`.
  */
 async function updateNotificationPrefs(userId, prefs) {
   try {
+    const currentPrefs = await getNotificationPrefs(userId);
+    const safePrefs = prefs || {};
+
+    const updatedPrefs = {
+      user_id: userId,
+      scan_complete:
+        'scan_complete' in safePrefs ? safePrefs.scan_complete : currentPrefs.scan_complete,
+      risk_alerts:
+        'risk_alerts' in safePrefs ? safePrefs.risk_alerts : currentPrefs.risk_alerts,
+      weekly_summary:
+        'weekly_summary' in safePrefs ? safePrefs.weekly_summary : currentPrefs.weekly_summary,
+    };
+
     const { data, error } = await supabase
       .from('notification_preferences')
-      .upsert(
-        {
-          user_id: userId,
-          scan_complete: prefs.scan_complete ?? true,
-          risk_alerts: prefs.risk_alerts ?? true,
-          weekly_summary: prefs.weekly_summary ?? true,
-        },
-        { onConflict: 'user_id' }
-      )
+      .upsert(updatedPrefs, { onConflict: 'user_id' })
       .select()
       .single();
 

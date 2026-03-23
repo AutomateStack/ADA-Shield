@@ -94,7 +94,7 @@ function SettingsContent() {
       if (!session) return;
 
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-      await fetch(`${apiUrl}/api/notifications`, {
+      const res = await fetch(`${apiUrl}/api/notifications`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -106,8 +106,12 @@ function SettingsContent() {
           weekly_summary: newPrefs.weeklySummary,
         }),
       });
+      if (!res.ok) {
+        // Revert optimistic update on API failure
+        setNotifPrefs(notifPrefs);
+      }
     } catch {
-      // Revert on failure
+      // Revert on network failure
       setNotifPrefs(notifPrefs);
     } finally {
       setNotifSaving(false);

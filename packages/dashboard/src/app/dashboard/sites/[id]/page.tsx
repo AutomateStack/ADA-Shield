@@ -93,17 +93,19 @@ export default function SiteDetailPage() {
         data: { session },
       } = await supabase.auth.getSession();
 
+      if (!session) {
+        throw new Error('You must be logged in to run a scan');
+      }
+
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/scan/free`,
+        `${process.env.NEXT_PUBLIC_API_URL}/api/scan/run`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            ...(session?.access_token
-              ? { Authorization: `Bearer ${session.access_token}` }
-              : {}),
+            Authorization: `Bearer ${session.access_token}`,
           },
-          body: JSON.stringify({ url: site.url }),
+          body: JSON.stringify({ siteId }),
         }
       );
 
@@ -112,38 +114,20 @@ export default function SiteDetailPage() {
         throw new Error(data.error || 'Scan failed');
       }
 
-      const result = await res.json();
-
-      // Save to database
-      const { data: saved } = await supabase
+      // The API already saves the result to the DB; re-fetch latest scans
+      const { data: scanData, error: fetchError } = await supabase
         .from('scan_results')
-        .insert({
-          site_id: siteId,
-          user_id: (await supabase.auth.getUser()).data.user?.id,
-          url: site.url,
-          risk_score: result.riskScore,
-          total_violations: result.totalViolations,
-          critical_count: result.criticalCount,
-          serious_count: result.seriousCount,
-          moderate_count: result.moderateCount,
-          minor_count: result.minorCount || 0,
-          violations: result.violations,
-          passed_rules: result.passedRules,
-          scan_duration_ms: result.scanDurationMs,
-        })
-        .select()
-        .single();
+        .select('*')
+        .eq('site_id', siteId)
+        .order('scanned_at', { ascending: false })
+        .limit(20);
 
-      if (saved) {
-        setScans([saved, ...scans]);
-        setSelectedScan(saved);
+      if (fetchError) throw new Error(fetchError.message);
+
+      if (scanData && scanData.length > 0) {
+        setScans(scanData);
+        setSelectedScan(scanData[0]);
       }
-
-      // Update last_scanned_at
-      await supabase
-        .from('sites')
-        .update({ last_scanned_at: new Date().toISOString() })
-        .eq('id', siteId);
     } catch (err: any) {
       alert(err.message || 'Scan failed');
     } finally {
