@@ -2,6 +2,7 @@ const { Router } = require('express');
 const { getMonitoredSites } = require('../db/sites');
 const { saveScanResult, getLatestScanResult, updateSiteLastScanned } = require('../db/scans');
 const { getNotificationPrefs } = require('../db/notifications');
+const { getUserSubscription } = require('../db/subscriptions');
 const { scanPage, calculateRiskScore } = require('@ada-shield/scanner');
 const { sendScanCompleteEmail, sendRiskAlertEmail, sendWeeklySummaryEmail } = require('../services/email');
 const { logger } = require('../utils/logger');
@@ -31,6 +32,16 @@ router.post('/trigger-weekly-scan', async (req, res, next) => {
 
     for (const site of sites) {
       try {
+        // Skip sites whose owner has no active subscription (monitoring is a paid feature)
+        const subscription = await getUserSubscription(site.user_id);
+        if (!subscription) {
+          logger.info('Skipping weekly scan — no active subscription', {
+            siteId: site.id, userId: site.user_id,
+          });
+          results.push({ siteId: site.id, url: site.url, status: 'skipped' });
+          continue;
+        }
+
         // Get previous scan for trend comparison
         const previousScan = await getLatestScanResult(site.id);
 

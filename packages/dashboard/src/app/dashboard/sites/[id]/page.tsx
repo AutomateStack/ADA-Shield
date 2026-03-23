@@ -115,7 +115,27 @@ export default function SiteDetailPage() {
         throw new Error(data.error || 'Scan failed');
       }
 
-      const { jobId } = await res.json();
+      const responseData = await res.json();
+
+      // Sync mode: scan completed immediately (Redis not available)
+      if (responseData.status === 'completed') {
+        // Refresh scan list — the result is already saved in DB
+        const { data: scanData } = await supabase
+          .from('scan_results')
+          .select('*')
+          .eq('site_id', siteId)
+          .order('scanned_at', { ascending: false })
+          .limit(20);
+
+        if (scanData && scanData.length > 0) {
+          setScans(scanData);
+          setSelectedScan(scanData[0]);
+        }
+        return;
+      }
+
+      // Async mode: poll for job completion
+      const { jobId } = responseData;
 
       // Poll for job completion using exponential backoff (max ~3 minutes)
       const MAX_POLL_ATTEMPTS = 20;

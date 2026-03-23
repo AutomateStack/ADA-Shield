@@ -66,18 +66,30 @@ export default function SitesPage() {
 
       const supabase = createSupabaseBrowser();
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
+        data: { session },
+      } = await supabase.auth.getSession();
 
-      if (!user) throw new Error('Not authenticated');
+      if (!session) throw new Error('Not authenticated');
 
-      const { error: insertError } = await supabase.from('sites').insert({
-        user_id: user.id,
-        url: siteUrl,
-        name: name.trim() || new URL(siteUrl).hostname,
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+      const res = await fetch(`${apiUrl}/api/sites`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ url: siteUrl, name: name.trim() || undefined }),
       });
 
-      if (insertError) throw insertError;
+      const data = await res.json();
+      if (!res.ok) {
+        if (res.status === 403 && data.upgradeRequired) {
+          setError(`${data.message} Visit Billing to upgrade.`);
+        } else {
+          setError(data.error || 'Failed to add site');
+        }
+        return;
+      }
 
       setUrl('');
       setName('');
@@ -96,7 +108,23 @@ export default function SitesPage() {
     setDeleting(siteId);
     try {
       const supabase = createSupabaseBrowser();
-      await supabase.from('sites').delete().eq('id', siteId);
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) throw new Error('Not authenticated');
+
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+      const res = await fetch(`${apiUrl}/api/sites/${siteId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to delete site');
+      }
+
       setSites(sites.filter((s) => s.id !== siteId));
     } catch (err: any) {
       setError(err.message || 'Failed to delete site');
