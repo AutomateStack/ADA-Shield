@@ -159,6 +159,14 @@ router.get(
   authenticate,
   async (req, res, next) => {
     try {
+      // Guard: queue requires Redis — return 503 if not configured
+      if (!getScanQueue()) {
+        return res.status(503).json({
+          error: 'Scan queue unavailable',
+          message: 'Async scanning requires Redis. Please contact support.',
+        });
+      }
+
       const { jobId } = req.params;
       const status = await getScanJobStatus(jobId);
       if (!status) {
