@@ -46,6 +46,12 @@ export function Navbar() {
         {/* Auth Buttons */}
         <div className="hidden md:flex items-center gap-3">
           <Link
+            href="/"
+            className="text-sm font-semibold px-4 py-2 bg-brand-500/10 border border-brand-500/30 text-brand-300 hover:bg-brand-500/20 rounded-lg transition-colors"
+          >
+            Free Scan
+          </Link>
+          <Link
             href="/login"
             className="text-sm font-medium text-slate-300 hover:text-white transition-colors"
           >
@@ -83,6 +89,13 @@ export function Navbar() {
             </a>
           ))}
           <div className="flex gap-3 mt-4">
+            <Link
+              href="/"
+              className="flex-1 text-center py-2 text-sm text-brand-300 border border-brand-500/30 rounded-lg hover:bg-brand-500/10"
+              onClick={() => setMobileOpen(false)}
+            >
+              Free Scan
+            </Link>
             <Link
               href="/login"
               className="flex-1 text-center py-2 text-sm text-slate-300 border border-white/20 rounded-lg hover:bg-white/5"

@@ -72,20 +72,25 @@ export default function HomePage() {
 
           {/* Social proof numbers */}
           {!result && !scanning && (
-            <div className="flex justify-center gap-8 md:gap-16 mt-16">
-              <div className="text-center">
-                <div className="text-3xl font-bold text-white">WCAG 2.1</div>
-                <div className="text-sm text-slate-500 mt-1">AA Standard</div>
+            <>
+              <p className="text-center text-sm text-slate-500 mt-8">
+                Trusted by businesses to stay ADA compliant
+              </p>
+              <div className="flex justify-center gap-8 md:gap-16 mt-6">
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-white">WCAG 2.1</div>
+                  <div className="text-sm text-slate-500 mt-1">AA Standard</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-white">57%</div>
+                  <div className="text-sm text-slate-500 mt-1">Violations Auto-detected</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-white">&lt; 60s</div>
+                  <div className="text-sm text-slate-500 mt-1">Scan Time</div>
+                </div>
               </div>
-              <div className="text-center">
-                <div className="text-3xl font-bold text-white">50+</div>
-                <div className="text-sm text-slate-500 mt-1">Accessibility Rules</div>
-              </div>
-              <div className="text-center">
-                <div className="text-3xl font-bold text-white">&lt; 30s</div>
-                <div className="text-sm text-slate-500 mt-1">Scan Time</div>
-              </div>
-            </div>
+            </>
           )}
         </section>
 
@@ -200,7 +205,7 @@ export default function HomePage() {
                     description="For small businesses with a single website."
                     features={[
                       '1 website',
-                      '100 pages per scan',
+                      '10 pages per scan',
                       'Weekly monitoring',
                       'Email alerts',
                       'Exact code fixes',
@@ -210,12 +215,12 @@ export default function HomePage() {
                   />
                   <PricingCard
                     name="Business"
-                    price="$79"
+                    price="$99"
                     period="/month"
                     description="For growing businesses with multiple sites."
                     features={[
                       '5 websites',
-                      '500 pages per scan',
+                      '50 pages per scan',
                       'Weekly monitoring',
                       'Priority email alerts',
                       'Exact code fixes',
