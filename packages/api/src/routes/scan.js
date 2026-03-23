@@ -4,7 +4,7 @@ const { scanPage } = require('@ada-shield/scanner');
 const { calculateRiskScore } = require('@ada-shield/scanner');
 const { getUserSubscription, PLAN_LIMITS } = require('../db/subscriptions');
 const { getUserSites, getUserSiteById } = require('../db/sites');
-const { saveScanResult } = require('../db/scans');
+const { saveScanResult, updateSiteLastScanned } = require('../db/scans');
 const { createRateLimiter } = require('../middleware/rate-limiter');
 const { authenticate } = require('../middleware/auth');
 const { logger } = require('../utils/logger');
@@ -146,11 +146,41 @@ router.post(
       // Compute effective page limit (capped to the plan's maximum)
       const effectivePageLimit = limits.pagesLimit;
 
-      // Guard: queue requires Redis — return 503 if not configured
+      // If Redis is not configured, fall back to synchronous scanning
       if (!getScanQueue()) {
-        return res.status(503).json({
-          error: 'Scan queue unavailable',
-          message: 'Async scanning requires Redis. Please contact support.',
+        logger.info('Redis unavailable — running authenticated scan synchronously', {
+          siteId, userId, url: site.url,
+        });
+
+        const scanResult = await scanPage(site.url);
+        const riskResult = calculateRiskScore(scanResult.violations);
+
+        const saved = await saveScanResult({
+          siteId,
+          userId,
+          url: scanResult.url,
+          riskScore: riskResult.score,
+          totalViolations: scanResult.totalViolations,
+          criticalCount: scanResult.criticalCount,
+          seriousCount: scanResult.seriousCount,
+          moderateCount: scanResult.moderateCount,
+          minorCount: scanResult.minorCount,
+          violations: scanResult.violations,
+          passedRules: scanResult.passedRules,
+          incompleteRules: scanResult.incompleteRules || 0,
+          scanDurationMs: scanResult.scanDurationMs,
+        });
+
+        await updateSiteLastScanned(siteId);
+
+        logger.info('Synchronous authenticated scan completed', {
+          siteId, userId, scanId: saved.id, riskScore: riskResult.score,
+        });
+
+        return res.json({
+          status: 'completed',
+          syncMode: true,
+          scanId: saved.id,
         });
       }
 

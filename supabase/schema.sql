@@ -5,6 +5,18 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- ═══════════════════════════════════════════════════════════════════
+-- Profiles table — public user data, auto-populated on signup via trigger
+-- ═══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS profiles (
+  id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
+  email TEXT,
+  full_name TEXT,
+  avatar_url TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ═══════════════════════════════════════════════════════════════════
 -- Sites table
 -- ═══════════════════════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS sites (
@@ -72,10 +84,15 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
 -- ═══════════════════════════════════════════════════════════════════
 -- Row Level Security
 -- ═══════════════════════════════════════════════════════════════════
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sites ENABLE ROW LEVEL SECURITY;
 ALTER TABLE scan_results ENABLE ROW LEVEL SECURITY;
 ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notification_preferences ENABLE ROW LEVEL SECURITY;
+
+-- Profiles: users can only manage their own profile
+CREATE POLICY "Users manage own profile" ON profiles
+  FOR ALL USING (auth.uid() = id);
 
 -- Sites: users can only manage their own sites
 CREATE POLICY "Users manage own sites" ON sites
@@ -103,6 +120,7 @@ CREATE POLICY "Users manage own notification prefs" ON notification_preferences
 -- ═══════════════════════════════════════════════════════════════════
 -- Indexes for performance
 -- ═══════════════════════════════════════════════════════════════════
+CREATE INDEX IF NOT EXISTS idx_profiles_id ON profiles(id);
 CREATE INDEX IF NOT EXISTS idx_sites_user_id ON sites(user_id);
 CREATE INDEX IF NOT EXISTS idx_scan_results_site_id ON scan_results(site_id);
 CREATE INDEX IF NOT EXISTS idx_scan_results_user_id ON scan_results(user_id);

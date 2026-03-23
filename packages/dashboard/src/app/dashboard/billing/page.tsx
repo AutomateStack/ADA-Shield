@@ -25,7 +25,7 @@ const plans = [
   {
     name: 'Business',
     key: 'business',
-    price: '$79',
+    price: '$99',
     period: '/month',
     description: 'For companies managing multiple sites.',
     icon: Shield,
