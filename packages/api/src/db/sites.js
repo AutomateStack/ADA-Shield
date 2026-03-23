@@ -119,6 +119,9 @@ async function getMonitoredSites() {
     // Gracefully skip if the table doesn't exist yet (migration not yet run).
     const userIds = [...new Set(sites.map((s) => s.user_id).filter(Boolean))];
     let emailMap = {};
+    if (userIds.length === 0) {
+      return sites.map((site) => ({ ...site, users: { email: null } }));
+    }
     try {
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')

@@ -13,12 +13,16 @@ jobs:
     steps:
       - name: Trigger weekly scan endpoint
         run: |
-          # Capture both the response body and HTTP status code
-          body=$(curl -s --max-time 300 \
+          # Use -sS so transport errors are shown; --fail-with-body makes curl
+          # exit non-zero on HTTP errors while still printing the response body.
+          body=$(curl -sS --fail-with-body --max-time 300 \
             -X POST "${{ secrets.API_URL }}/api/internal/trigger-weekly-scan" \
             -H "Content-Type: application/json" \
             -H "x-internal-secret: ${{ secrets.INTERNAL_API_SECRET }}" \
-            -w '\n__STATUS__%{http_code}')
+            -w '\n__STATUS__%{http_code}') || {
+            echo "curl failed (transport error or non-2xx response)"
+            exit 1
+          }
 
           status=$(echo "$body" | tail -1 | sed 's/__STATUS__//')
           response_body=$(echo "$body" | sed '$d')
