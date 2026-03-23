@@ -156,9 +156,9 @@ router.get(
       if (!status) {
         return res.status(404).json({ error: 'Job not found' });
       }
-      // Verify the job belongs to the requesting user
-      if (status.userId && status.userId !== req.user.id) {
-        return res.status(403).json({ error: 'Access denied' });
+      // Verify the job belongs to the requesting user; treat missing userId as unauthorized
+      if (status.userId !== req.user.id) {
+        return res.status(status.userId ? 403 : 404).json({ error: 'Access denied' });
       }
       return res.json(status);
     } catch (error) {

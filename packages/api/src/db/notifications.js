@@ -32,33 +32,58 @@ async function getNotificationPrefs(userId) {
 }
 
 /**
- * Updates notification preferences for a user (upsert).
+ * Updates notification preferences for a user.
  * Supports partial updates: omitted fields keep their existing values.
+ * Uses UPDATE-then-INSERT to avoid read-modify-write race conditions under
+ * concurrent requests — only the explicitly provided fields are modified.
  */
 async function updateNotificationPrefs(userId, prefs) {
   try {
     const incomingPrefs = prefs || {};
 
-    // Fetch current preferences to merge with, so omitted fields are not reset
-    const currentPrefs = await getNotificationPrefs(userId);
+    // Build the update payload from only the explicitly provided fields
+    const updatePayload = {};
+    if (incomingPrefs.scan_complete !== undefined) updatePayload.scan_complete = incomingPrefs.scan_complete;
+    if (incomingPrefs.risk_alerts !== undefined) updatePayload.risk_alerts = incomingPrefs.risk_alerts;
+    if (incomingPrefs.weekly_summary !== undefined) updatePayload.weekly_summary = incomingPrefs.weekly_summary;
 
-    const { data, error } = await supabase
+    if (Object.keys(updatePayload).length === 0) {
+      // Nothing to change — return current prefs (or defaults if row doesn't exist yet)
+      return getNotificationPrefs(userId);
+    }
+
+    // Attempt UPDATE first — only the provided fields are touched, so concurrent
+    // partial updates for different fields cannot overwrite each other.
+    const { data: updated, error: updateError } = await supabase
       .from('notification_preferences')
-      .upsert(
-        {
-          user_id: userId,
-          scan_complete: incomingPrefs.scan_complete ?? currentPrefs.scan_complete,
-          risk_alerts: incomingPrefs.risk_alerts ?? currentPrefs.risk_alerts,
-          weekly_summary: incomingPrefs.weekly_summary ?? currentPrefs.weekly_summary,
-        },
-        { onConflict: 'user_id' }
-      )
+      .update(updatePayload)
+      .eq('user_id', userId)
       .select()
       .single();
 
-    if (error) throw error;
-    logger.info('Notification prefs updated', { userId });
-    return data;
+    if (!updateError) {
+      logger.info('Notification prefs updated', { userId });
+      return updated;
+    }
+
+    // PGRST116 means no row matched — INSERT a new row merging defaults with incoming values
+    if (updateError.code === 'PGRST116') {
+      const { data: inserted, error: insertError } = await supabase
+        .from('notification_preferences')
+        .insert({
+          user_id: userId,
+          ...DEFAULT_PREFERENCES,
+          ...updatePayload,
+        })
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+      logger.info('Notification prefs created', { userId });
+      return inserted;
+    }
+
+    throw updateError;
   } catch (error) {
     logger.error('Failed to update notification prefs', { userId, error: error.message });
     throw error;
