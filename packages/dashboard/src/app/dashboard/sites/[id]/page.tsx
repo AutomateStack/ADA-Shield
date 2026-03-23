@@ -93,17 +93,19 @@ export default function SiteDetailPage() {
         data: { session },
       } = await supabase.auth.getSession();
 
+      if (!session) throw new Error('Not authenticated');
+
+      // Use the authenticated scan endpoint — it enforces plan limits,
+      // saves the result to the database, and sends notification emails.
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/scan/free`,
+        `${process.env.NEXT_PUBLIC_API_URL}/api/scan/run`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            ...(session?.access_token
-              ? { Authorization: `Bearer ${session.access_token}` }
-              : {}),
+            Authorization: `Bearer ${session.access_token}`,
           },
-          body: JSON.stringify({ url: site.url }),
+          body: JSON.stringify({ siteId }),
         }
       );
 
@@ -112,38 +114,40 @@ export default function SiteDetailPage() {
         throw new Error(data.error || 'Scan failed');
       }
 
-      const result = await res.json();
+      const data = await res.json();
 
-      // Save to database
-      const { data: saved } = await supabase
-        .from('scan_results')
-        .insert({
-          site_id: siteId,
-          user_id: (await supabase.auth.getUser()).data.user?.id,
-          url: site.url,
-          risk_score: result.riskScore,
-          total_violations: result.totalViolations,
-          critical_count: result.criticalCount,
-          serious_count: result.seriousCount,
-          moderate_count: result.moderateCount,
-          minor_count: result.minorCount || 0,
-          violations: result.violations,
-          passed_rules: result.passedRules,
-          scan_duration_ms: result.scanDurationMs,
-        })
-        .select()
-        .single();
-
-      if (saved) {
-        setScans([saved, ...scans]);
-        setSelectedScan(saved);
+      if (data.status === 'queued') {
+        // BullMQ job enqueued — poll until the worker finishes
+        // Allow up to 60 attempts × 2 s = 2 minutes before timing out
+        const maxAttempts = 60;
+        for (let i = 0; i < maxAttempts; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          const statusRes = await fetch(
+            `${process.env.NEXT_PUBLIC_API_URL}/api/scan/status/${data.jobId}`,
+            { headers: { Authorization: `Bearer ${session.access_token}` } }
+          );
+          if (!statusRes.ok) throw new Error('Failed to check scan status');
+          const statusData = await statusRes.json();
+          if (statusData.status === 'completed') break;
+          if (statusData.status === 'failed') throw new Error('Scan job failed');
+          if (i === maxAttempts - 1) throw new Error('Scan timed out');
+        }
       }
 
-      // Update last_scanned_at
-      await supabase
-        .from('sites')
-        .update({ last_scanned_at: new Date().toISOString() })
-        .eq('id', siteId);
+      // Reload scan history — the API has already persisted the result
+      const { data: scanData, error: scanError } = await supabase
+        .from('scan_results')
+        .select('*')
+        .eq('site_id', siteId)
+        .order('scanned_at', { ascending: false })
+        .limit(20);
+
+      if (scanError) throw new Error(scanError.message);
+
+      if (scanData && scanData.length > 0) {
+        setScans(scanData);
+        setSelectedScan(scanData[0]);
+      }
     } catch (err: any) {
       alert(err.message || 'Scan failed');
     } finally {

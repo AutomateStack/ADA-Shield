@@ -56,19 +56,17 @@ export default function DashboardPage() {
         if (sitesData) {
           setSites(sitesData);
 
-          // Fetch latest scan for each site
-          const scans: Record<string, LatestScan> = {};
-          for (const site of sitesData) {
-            const { data: scanData } = await supabase
-              .from('scan_results')
-              .select('risk_score, total_violations, critical_count, serious_count, passed_rules, scanned_at')
-              .eq('site_id', site.id)
-              .order('scanned_at', { ascending: false })
-              .limit(1)
-              .single();
+          // Fetch latest scan for each site in a single batch query
+          const { data: allScans } = await supabase
+            .from('scan_results')
+            .select('site_id, risk_score, total_violations, critical_count, serious_count, passed_rules, scanned_at')
+            .in('site_id', sitesData.map((s) => s.id))
+            .order('scanned_at', { ascending: false });
 
-            if (scanData) {
-              scans[site.id] = scanData;
+          const scans: Record<string, LatestScan> = {};
+          for (const scan of allScans || []) {
+            if (!scans[scan.site_id]) {
+              scans[scan.site_id] = scan;
             }
           }
           setLatestScans(scans);

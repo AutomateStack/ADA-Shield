@@ -34,6 +34,8 @@ services:
         sync: false
       - key: DASHBOARD_URL
         sync: false
+      - key: REDIS_URL
+        sync: false
       - key: EMAIL_FROM
         sync: false
       - key: PORT

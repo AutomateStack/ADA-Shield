@@ -6,6 +6,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const { logger } = require('./utils/logger');
 const { validateConfig } = require('./utils/config');
+const { initScanQueue } = require('./queue');
 const { scanRoutes } = require('./routes/scan');
 const { webhookRoutes } = require('./routes/webhooks');
 const { internalRoutes } = require('./routes/internal');
@@ -16,6 +17,9 @@ const { createRateLimiter } = require('./middleware/rate-limiter');
 
 // Validate environment variables at startup
 validateConfig();
+
+// Initialise BullMQ scan queue (no-op when REDIS_URL is absent)
+initScanQueue(process.env.REDIS_URL);
 
 const app = express();
 const PORT = process.env.PORT || 4000;

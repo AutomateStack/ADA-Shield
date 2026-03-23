@@ -7,9 +7,10 @@ const { getUserSubscription, PLAN_LIMITS } = require('../db/subscriptions');
 const { getUserSites } = require('../db/sites');
 const { getNotificationPrefs } = require('../db/notifications');
 const { createRateLimiter } = require('../middleware/rate-limiter');
-const { authenticate, optionalAuth } = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
 const { sendScanCompleteEmail, sendRiskAlertEmail } = require('../services/email');
 const { logger } = require('../utils/logger');
+const { getScanQueue, enqueueScan } = require('../queue');
 
 const router = Router();
 
@@ -27,6 +28,7 @@ const freeScanSchema = z.object({
 
 const authenticatedScanSchema = z.object({
   siteId: z.string().uuid('Invalid site ID'),
+  pageLimit: z.number().int().positive().optional(),
 });
 
 // ── Free Scan Endpoint ──────────────────────────────────────────────
@@ -97,13 +99,17 @@ router.post(
         });
       }
 
-      const { siteId } = parsed.data;
+      const { siteId, pageLimit: requestedPageLimit } = parsed.data;
       const userId = req.user.id;
 
       // Check subscription and enforce plan limits
       const subscription = await getUserSubscription(userId);
       const plan = subscription?.plan || 'free';
       const limits = PLAN_LIMITS[plan] || { pagesLimit: 1, sitesLimit: 1 };
+      const effectivePageLimit =
+        typeof requestedPageLimit === 'number' && requestedPageLimit > 0
+          ? Math.min(requestedPageLimit, limits.pagesLimit)
+          : limits.pagesLimit;
 
       // Check site limit
       const userSites = await getUserSites(userId);
@@ -121,8 +127,25 @@ router.post(
         return res.status(404).json({ error: 'Site not found' });
       }
 
-      // Run scan synchronously
+      // Run scan — enqueue via BullMQ when Redis is available, otherwise run synchronously
       logger.info('Authenticated scan started', { siteId, userId, url: site.url });
+
+      const scanQueue = getScanQueue();
+      if (scanQueue) {
+        const job = await enqueueScan({
+          url: site.url,
+          siteId,
+          userId,
+          pageLimit: effectivePageLimit,
+          userEmail: req.user.email,
+          siteName: site.name,
+        });
+
+        logger.info('Authenticated scan queued', { siteId, userId, jobId: job.id });
+        return res.json({ status: 'queued', jobId: job.id });
+      }
+
+      // Synchronous fallback (no Redis configured)
       const scanResult = await scanPage(site.url);
       const riskResult = calculateRiskScore(scanResult.violations);
 
@@ -214,6 +237,29 @@ router.get(
       const { getScanResults } = require('../db/scans');
       const results = await getScanResults(siteId);
       return res.json({ results });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ── Scan Job Status ─────────────────────────────────────────────────
+router.get(
+  '/status/:jobId',
+  authenticate,
+  async (req, res, next) => {
+    try {
+      const { jobId } = req.params;
+      const scanQueue = getScanQueue();
+      if (!scanQueue) {
+        return res.status(503).json({ error: 'Queue not available' });
+      }
+      const job = await scanQueue.getJob(jobId);
+      if (!job) {
+        return res.status(404).json({ error: 'Job not found' });
+      }
+      const state = await job.getState();
+      return res.json({ status: state, jobId });
     } catch (error) {
       next(error);
     }
