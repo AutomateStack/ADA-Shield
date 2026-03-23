@@ -93,17 +93,20 @@ export default function SiteDetailPage() {
         data: { session },
       } = await supabase.auth.getSession();
 
+      if (!session?.access_token) {
+        throw new Error('Not authenticated');
+      }
+
+      // Enqueue scan via the authenticated API endpoint
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/scan/free`,
+        `${process.env.NEXT_PUBLIC_API_URL}/api/scan/run`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            ...(session?.access_token
-              ? { Authorization: `Bearer ${session.access_token}` }
-              : {}),
+            Authorization: `Bearer ${session.access_token}`,
           },
-          body: JSON.stringify({ url: site.url }),
+          body: JSON.stringify({ siteId }),
         }
       );
 
@@ -112,38 +115,60 @@ export default function SiteDetailPage() {
         throw new Error(data.error || 'Scan failed');
       }
 
-      const result = await res.json();
+      const { jobId } = await res.json();
 
-      // Save to database
-      const { data: saved } = await supabase
-        .from('scan_results')
-        .insert({
-          site_id: siteId,
-          user_id: (await supabase.auth.getUser()).data.user?.id,
-          url: site.url,
-          risk_score: result.riskScore,
-          total_violations: result.totalViolations,
-          critical_count: result.criticalCount,
-          serious_count: result.seriousCount,
-          moderate_count: result.moderateCount,
-          minor_count: result.minorCount || 0,
-          violations: result.violations,
-          passed_rules: result.passedRules,
-          scan_duration_ms: result.scanDurationMs,
-        })
-        .select()
-        .single();
+      // Poll for job completion using exponential backoff (max ~3 minutes)
+      const MAX_POLL_ATTEMPTS = 20;
+      let attempt = 0;
+      let completed = false;
+      let consecutiveErrors = 0;
+      const MAX_CONSECUTIVE_ERRORS = 3;
 
-      if (saved) {
-        setScans([saved, ...scans]);
-        setSelectedScan(saved);
+      while (attempt < MAX_POLL_ATTEMPTS && !completed) {
+        // Exponential backoff: 2s, 4s, 8s … capped at 16s
+        const delay = Math.min(2000 * Math.pow(2, attempt), 16000);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        attempt++;
+
+        const statusRes = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL}/api/scan/status/${jobId}`,
+          { headers: { Authorization: `Bearer ${session.access_token}` } }
+        );
+
+        if (!statusRes.ok) {
+          consecutiveErrors++;
+          if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+            throw new Error('Lost contact with the server while waiting for scan results.');
+          }
+          continue;
+        }
+
+        consecutiveErrors = 0;
+        const statusData = await statusRes.json();
+
+        if (statusData.state === 'completed') {
+          completed = true;
+        } else if (statusData.state === 'failed') {
+          throw new Error(statusData.failedReason || 'Scan job failed');
+        }
       }
 
-      // Update last_scanned_at
-      await supabase
-        .from('sites')
-        .update({ last_scanned_at: new Date().toISOString() })
-        .eq('id', siteId);
+      if (!completed) {
+        throw new Error('Scan timed out. Check back later for results.');
+      }
+
+      // Refresh scan list from Supabase (worker has already saved the result)
+      const { data: scanData } = await supabase
+        .from('scan_results')
+        .select('*')
+        .eq('site_id', siteId)
+        .order('scanned_at', { ascending: false })
+        .limit(20);
+
+      if (scanData && scanData.length > 0) {
+        setScans(scanData);
+        setSelectedScan(scanData[0]);
+      }
     } catch (err: any) {
       alert(err.message || 'Scan failed');
     } finally {

@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS sites (
 CREATE TABLE IF NOT EXISTS scan_results (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   site_id UUID REFERENCES sites(id) ON DELETE CASCADE,
-  user_id UUID REFERENCES auth.users(id),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
   url TEXT NOT NULL,
   scanned_at TIMESTAMPTZ DEFAULT NOW(),
   risk_score INTEGER,
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS scan_results (
 -- ═══════════════════════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS subscriptions (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  user_id UUID REFERENCES auth.users(id),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
   stripe_customer_id TEXT UNIQUE,
   stripe_subscription_id TEXT UNIQUE,
   plan TEXT CHECK (plan IN ('starter', 'business', 'agency')),
@@ -78,9 +78,16 @@ ALTER TABLE notification_preferences ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users manage own sites" ON sites
   FOR ALL USING (auth.uid() = user_id);
 
--- Scan results: users can only see their own scans
+-- Scan results: users can only see their own scans on their own sites
 CREATE POLICY "Users see own scans" ON scan_results
-  FOR ALL USING (auth.uid() = user_id);
+  FOR ALL USING (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1 FROM sites
+      WHERE sites.id = scan_results.site_id
+        AND sites.user_id = auth.uid()
+    )
+  );
 
 -- Subscriptions: users can only see their own subscription
 CREATE POLICY "Users see own subscription" ON subscriptions
