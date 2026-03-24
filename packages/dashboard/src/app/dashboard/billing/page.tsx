@@ -4,6 +4,12 @@ import { useState, useEffect } from 'react';
 import { Check, Loader2, Shield, Zap, Building2, ArrowRight, ExternalLink } from 'lucide-react';
 import { createSupabaseBrowser } from '@/lib/supabase/client';
 
+const GUMROAD_LINKS: Record<string, string> = {
+  starter: 'https://thirmal.gumroad.com/l/onvhab',
+  business: 'https://thirmal.gumroad.com/l/nycue',
+  agency: 'https://thirmal.gumroad.com/l/hsukmx',
+};
+
 const plans = [
   {
     name: 'Starter',
@@ -71,7 +77,10 @@ export default function BillingPage() {
     });
   }, []);
 
-  const gumroadUrl = `https://thirmal.gumroad.com/l/onvhab${userEmail ? `?email=${encodeURIComponent(userEmail)}` : ''}`;
+  const buildGumroadUrl = (planKey: string) => {
+    const base = GUMROAD_LINKS[planKey] ?? GUMROAD_LINKS.starter;
+    return userEmail ? `${base}?email=${encodeURIComponent(userEmail)}` : base;
+  };
 
   return (
     <div>
@@ -141,7 +150,7 @@ export default function BillingPage() {
             </ul>
 
             <a
-              href={gumroadUrl}
+              href={buildGumroadUrl(plan.key)}
               target="_blank"
               rel="noopener noreferrer"
               className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-semibold transition-all ${

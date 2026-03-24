@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Shield, Loader2, AlertCircle } from 'lucide-react';
+import { Shield, Loader2, AlertCircle, ArrowLeft } from 'lucide-react';
 import { createSupabaseBrowser } from '@/lib/supabase/client';
 
 export default function LoginPage() {
@@ -38,6 +38,14 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center px-4">
       <div className="w-full max-w-md">
+        {/* Back to home */}
+        <div className="mb-4">
+          <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-slate-400 hover:text-white transition-colors">
+            <ArrowLeft className="h-4 w-4" />
+            Back to Home
+          </Link>
+        </div>
+
         {/* Logo */}
         <Link href="/" className="flex items-center justify-center gap-2 mb-8">
           <Shield className="h-8 w-8 text-brand-400" />

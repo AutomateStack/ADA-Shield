@@ -105,8 +105,8 @@ export default function TermsOfServicePage() {
           <Section title="10. Contact">
             <p>
               For questions about these Terms, contact us at{' '}
-              <a href="mailto:support@adashield.com" className="text-brand-400 hover:text-brand-300">
-                support@adashield.com
+              <a href="mailto:tthirmal@gmail.com" className="text-brand-400 hover:text-brand-300">
+                tthirmal@gmail.com
               </a>.
             </p>
           </Section>
