@@ -8,6 +8,7 @@ import {
   Users,
   CreditCard,
   ArrowLeft,
+  FileText,
 } from 'lucide-react';
 import { ShieldLogo } from '@/components/ui/shield-logo';
 import { cn } from '@/lib/utils';
@@ -17,6 +18,7 @@ const adminNavItems = [
   { href: '/admin/scans', label: 'Scans', icon: Activity },
   { href: '/admin/users', label: 'Users', icon: Users },
   { href: '/admin/subscriptions', label: 'Subscriptions', icon: CreditCard },
+  { href: '/admin/blog', label: 'Blog', icon: FileText },
 ];
 
 export default function AdminLayout({

@@ -100,5 +100,73 @@ router.get('/subscriptions', async (req, res, next) => {
   }
 });
 
+// ── Blog Posts ──────────────────────────────────────────────────────
+const { supabase: adminSupabase } = require('../db/supabase');
+
+// List all posts (drafts + published)
+router.get('/blog', async (req, res, next) => {
+  try {
+    const { data, error } = await adminSupabase
+      .from('blog_posts')
+      .select('id, slug, title, excerpt, author, tags, published, published_at, created_at')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return res.json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Create post
+router.post('/blog', async (req, res, next) => {
+  try {
+    const { slug, title, excerpt, content, cover_image, author, tags, published } = req.body;
+    if (!slug || !title || !content) {
+      return res.status(400).json({ error: 'slug, title, and content are required' });
+    }
+    const { data, error } = await adminSupabase
+      .from('blog_posts')
+      .insert({ slug, title, excerpt, content, cover_image: cover_image || null, author, tags: tags || [], published: !!published })
+      .select()
+      .single();
+    if (error) throw error;
+    return res.status(201).json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Update post
+router.put('/blog/:id', async (req, res, next) => {
+  try {
+    const { slug, title, excerpt, content, cover_image, author, tags, published } = req.body;
+    const { data, error } = await adminSupabase
+      .from('blog_posts')
+      .update({ slug, title, excerpt, content, cover_image: cover_image || null, author, tags: tags || [], published: !!published })
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ error: 'Post not found' });
+    return res.json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Delete post
+router.delete('/blog/:id', async (req, res, next) => {
+  try {
+    const { error } = await adminSupabase
+      .from('blog_posts')
+      .delete()
+      .eq('id', req.params.id);
+    if (error) throw error;
+    return res.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
 const adminRoutes = router;
 module.exports = { adminRoutes };

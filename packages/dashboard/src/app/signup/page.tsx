@@ -1,33 +1,59 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useMemo } from 'react';
 import Link from 'next/link';
-import { Shield, Loader2, AlertCircle, CheckCircle, Check, ArrowRight } from 'lucide-react';
+import { Shield, Loader2, AlertCircle, CheckCircle, Check, ArrowRight, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { createSupabaseBrowser } from '@/lib/supabase/client';
 
+// ── Password strength helpers ────────────────────────────────────────────────
+function getPasswordStrength(pw: string): { level: 0 | 1 | 2 | 3 | 4; label: string; color: string } {
+  if (!pw) return { level: 0, label: '', color: '' };
+  let score = 0;
+  if (pw.length >= 8) score++;
+  if (pw.length >= 12) score++;
+  if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) score++;
+  if (/[0-9]/.test(pw) && /[^A-Za-z0-9]/.test(pw)) score++;
+  const map: [string, string][] = [
+    ['Weak', 'bg-red-500'],
+    ['Fair', 'bg-orange-500'],
+    ['Good', 'bg-yellow-500'],
+    ['Strong', 'bg-green-500'],
+    ['Very Strong', 'bg-emerald-500'],
+  ];
+  return { level: score as 0 | 1 | 2 | 3 | 4, label: map[score][0], color: map[score][1] };
+}
+
 export default function SignupPage() {
-  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [userExists, setUserExists] = useState(false);
   const [success, setSuccess] = useState(false);
+
+  const strength = useMemo(() => getPasswordStrength(password), [password]);
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
     setError('');
+    setUserExists(false);
 
     if (password.length < 6) {
       setError('Password must be at least 6 characters');
-      setLoading(false);
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
       return;
     }
 
+    setLoading(true);
     try {
       const supabase = createSupabaseBrowser();
-      const { error: authError } = await supabase.auth.signUp({
+      const { data, error: authError } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -35,7 +61,23 @@ export default function SignupPage() {
         },
       });
 
-      if (authError) throw authError;
+      if (authError) {
+        // Supabase may return an explicit "already registered" error
+        const msg = authError.message.toLowerCase();
+        if (msg.includes('already registered') || msg.includes('already exists') || msg.includes('email address is already')) {
+          setUserExists(true);
+          return;
+        }
+        throw authError;
+      }
+
+      // When email confirmation is on, Supabase returns a user with no identities
+      // for an already-existing email — detect that case
+      if (data.user && (!data.user.identities || data.user.identities.length === 0)) {
+        setUserExists(true);
+        return;
+      }
+
       setSuccess(true);
     } catch (err: any) {
       setError(err.message || 'Failed to create account');
@@ -48,6 +90,13 @@ export default function SignupPage() {
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center px-4">
         <div className="w-full max-w-md text-center">
+          {/* Back to home */}
+          <div className="mb-4 text-left">
+            <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-slate-400 hover:text-white transition-colors">
+              <ArrowLeft className="h-4 w-4" />
+              Back to Home
+            </Link>
+          </div>
           <Link href="/" className="flex items-center justify-center gap-2 mb-8">
             <Shield className="h-8 w-8 text-brand-400" />
             <span className="text-2xl font-bold text-white">ADA Shield</span>
@@ -94,6 +143,14 @@ export default function SignupPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center px-4">
       <div className="w-full max-w-md">
+        {/* Back to home */}
+        <div className="mb-4">
+          <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-slate-400 hover:text-white transition-colors">
+            <ArrowLeft className="h-4 w-4" />
+            Back to Home
+          </Link>
+        </div>
+
         {/* Logo */}
         <Link href="/" className="flex items-center justify-center gap-2 mb-8">
           <Shield className="h-8 w-8 text-brand-400" />
@@ -112,6 +169,22 @@ export default function SignupPage() {
             <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg flex items-center gap-2 text-red-300 text-sm">
               <AlertCircle className="h-4 w-4 flex-shrink-0" />
               {error}
+            </div>
+          )}
+
+          {userExists && (
+            <div className="mb-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-sm">
+              <p className="text-yellow-300 font-medium mb-1">Account already exists</p>
+              <p className="text-slate-400">
+                An account with <strong className="text-white">{email}</strong> already exists.{' '}
+                <Link href="/login" className="text-brand-400 hover:text-brand-300 underline">
+                  Sign in instead
+                </Link>{' '}
+                or{' '}
+                <Link href="/forgot-password" className="text-brand-400 hover:text-brand-300 underline">
+                  reset your password
+                </Link>.
+              </p>
             </div>
           )}
 
@@ -169,17 +242,78 @@ export default function SignupPage() {
               <label htmlFor="password" className="block text-sm font-medium text-slate-300 mb-1.5">
                 Password
               </label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Min. 6 characters"
-                className="w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                required
-                minLength={6}
-                disabled={loading}
-              />
+              <div className="relative">
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Min. 6 characters"
+                  className="w-full px-4 py-3 pr-11 rounded-lg bg-white/10 border border-white/20 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                  required
+                  minLength={6}
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                  tabIndex={-1}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              {/* Password strength meter */}
+              {password && (
+                <div className="mt-2">
+                  <div className="flex gap-1 mb-1">
+                    {[1, 2, 3, 4].map((seg) => (
+                      <div
+                        key={seg}
+                        className={`h-1 flex-1 rounded-full transition-colors ${
+                          strength.level >= seg ? strength.color : 'bg-white/10'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Strength: <span className="text-white font-medium">{strength.label}</span>
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label htmlFor="confirmPassword" className="block text-sm font-medium text-slate-300 mb-1.5">
+                Confirm Password
+              </label>
+              <div className="relative">
+                <input
+                  id="confirmPassword"
+                  type={showConfirm ? 'text' : 'password'}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Re-enter your password"
+                  className={`w-full px-4 py-3 pr-11 rounded-lg bg-white/10 border text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent ${
+                    confirmPassword && confirmPassword !== password
+                      ? 'border-red-500/60'
+                      : 'border-white/20'
+                  }`}
+                  required
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirm((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                  tabIndex={-1}
+                >
+                  {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              {confirmPassword && confirmPassword !== password && (
+                <p className="mt-1 text-xs text-red-400">Passwords do not match</p>
+              )}
             </div>
 
             <button
