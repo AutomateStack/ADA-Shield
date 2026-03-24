@@ -117,8 +117,87 @@ const PLAN_LIMITS = {
   agency: { pagesLimit: 9999, sitesLimit: 9999 },
 };
 
+/**
+ * Creates or updates a subscription for a user identified by email.
+ * Used by the Gumroad webhook where only the buyer's email is known.
+ *
+ * @param {string} email - Buyer email from Gumroad.
+ * @param {object} params
+ * @param {string} params.plan - Plan name (starter/business/agency).
+ * @param {string} params.status - active | canceled
+ * @param {string} params.gumroadSaleId - Gumroad sale_id.
+ * @param {string} params.currentPeriodEnd - ISO timestamp.
+ * @returns {Promise<void>}
+ */
+async function upsertSubscriptionByEmail(email, params) {
+  try {
+    // Look up user in profiles table (mirrors auth.users, populated on signup)
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('email', email)
+      .single();
+
+    if (profileError || !profile) {
+      logger.error('Gumroad webhook: no account found for email', { email });
+      return null;
+    }
+
+    const userId = profile.id;
+    const limits = PLAN_LIMITS[params.plan] || PLAN_LIMITS.starter;
+
+    // Check if a row already exists for this user
+    const { data: existing } = await supabase
+      .from('subscriptions')
+      .select('id')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (existing) {
+      const { error } = await supabase
+        .from('subscriptions')
+        .update({
+          plan: params.plan,
+          status: params.status,
+          pages_limit: limits.pagesLimit,
+          sites_limit: limits.sitesLimit,
+          current_period_end: params.currentPeriodEnd,
+          gumroad_sale_id: params.gumroadSaleId,
+        })
+        .eq('user_id', userId);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from('subscriptions')
+        .insert({
+          user_id: userId,
+          plan: params.plan,
+          status: params.status,
+          pages_limit: limits.pagesLimit,
+          sites_limit: limits.sitesLimit,
+          current_period_end: params.currentPeriodEnd,
+          gumroad_sale_id: params.gumroadSaleId,
+        });
+      if (error) throw error;
+    }
+
+    logger.info('Gumroad subscription upserted', {
+      userId,
+      email,
+      plan: params.plan,
+      status: params.status,
+    });
+
+    return userId;
+  } catch (error) {
+    logger.error('Failed to upsert Gumroad subscription', { email, error: error.message });
+    throw error;
+  }
+}
+
 module.exports = {
   upsertSubscription,
+  upsertSubscriptionByEmail,
   getUserSubscription,
   updateSubscriptionStatus,
   PLAN_LIMITS,

@@ -1,7 +1,7 @@
 const { Router } = require('express');
 const express = require('express');
 const Stripe = require('stripe');
-const { upsertSubscription, updateSubscriptionStatus, PLAN_LIMITS } = require('../db/subscriptions');
+const { upsertSubscription, upsertSubscriptionByEmail, updateSubscriptionStatus, PLAN_LIMITS } = require('../db/subscriptions');
 const { logger } = require('../utils/logger');
 
 const router = Router();
@@ -175,4 +175,94 @@ function getPlanFromPriceId(priceId) {
 }
 
 const webhookRoutes = router;
-module.exports = { webhookRoutes };
+
+// ════════════════════════════════════════════════════════════════════════
+// Gumroad Webhook Handler
+// POST /api/webhooks/gumroad?token=<GUMROAD_WEBHOOK_TOKEN>
+// Gumroad sends application/x-www-form-urlencoded
+// ════════════════════════════════════════════════════════════════════════
+
+const gumroadRouter = Router();
+gumroadRouter.use(express.urlencoded({ extended: false }));
+
+/**
+ * Determine plan from Gumroad purchase: check variants first, then price.
+ * @param {string} variantsJson - JSON string from Gumroad variants field.
+ * @param {number} priceInCents
+ * @returns {'starter'|'business'|'agency'}
+ */
+function getPlanFromGumroad(variantsJson, priceInCents) {
+  try {
+    const variants = JSON.parse(variantsJson || '{}');
+    const tier = Object.values(variants).join(' ').toLowerCase();
+    if (tier.includes('agency')) return 'agency';
+    if (tier.includes('business')) return 'business';
+    if (tier.includes('starter')) return 'starter';
+  } catch (_) { /* fall through to price */ }
+
+  // Fall back to price matching (amounts in US cents)
+  if (priceInCents >= 19000) return 'agency';
+  if (priceInCents >= 9000) return 'business';
+  return 'starter';
+}
+
+gumroadRouter.post('/', async (req, res) => {
+  // Validate shared secret token from URL query string
+  const expectedToken = process.env.GUMROAD_WEBHOOK_TOKEN;
+  if (expectedToken && req.query.token !== expectedToken) {
+    logger.warn('Gumroad webhook: invalid token');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const {
+    email,
+    sale_id: saleId,
+    price,           // price in US cents as a string
+    variants,
+    refunded,
+    recurrence,
+  } = req.body;
+
+  if (!email || !saleId) {
+    logger.error('Gumroad webhook: missing required fields', { email, saleId });
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  try {
+    // Refund → cancel the subscription
+    if (refunded === 'true' || refunded === true) {
+      logger.info('Gumroad refund received — canceling subscription', { email, saleId });
+      await upsertSubscriptionByEmail(email, {
+        plan: 'starter', // keep plan reference, status drives access
+        status: 'canceled',
+        gumroadSaleId: saleId,
+        currentPeriodEnd: new Date().toISOString(),
+      });
+      return res.json({ received: true });
+    }
+
+    const priceInCents = parseInt(price, 10) || 0;
+    const plan = getPlanFromGumroad(variants, priceInCents);
+
+    // Set period end: 35 days for monthly (5-day buffer), 370 for yearly
+    const periodDays = recurrence === 'yearly' ? 370 : 35;
+    const currentPeriodEnd = new Date(
+      Date.now() + periodDays * 24 * 60 * 60 * 1000
+    ).toISOString();
+
+    await upsertSubscriptionByEmail(email, {
+      plan,
+      status: 'active',
+      gumroadSaleId: saleId,
+      currentPeriodEnd,
+    });
+
+    logger.info('Gumroad sale processed', { email, plan, saleId });
+    return res.json({ received: true });
+  } catch (error) {
+    logger.error('Gumroad webhook handler error', { error: error.message });
+    return res.status(500).json({ error: 'Webhook handler failed' });
+  }
+});
+
+module.exports = { webhookRoutes, gumroadWebhookRoutes: gumroadRouter };

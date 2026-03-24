@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { Check, Loader2, Shield, Zap, Building2, ArrowRight } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Check, Loader2, Shield, Zap, Building2, ArrowRight, ExternalLink } from 'lucide-react';
 import { createSupabaseBrowser } from '@/lib/supabase/client';
 
 const plans = [
@@ -62,50 +62,16 @@ const plans = [
 ];
 
 export default function BillingPage() {
-  const [loading, setLoading] = useState<string | null>(null);
-  const [error, setError] = useState('');
+  const [userEmail, setUserEmail] = useState('');
 
-  const handleCheckout = async (plan: string) => {
-    setError('');
-    setLoading(plan);
+  useEffect(() => {
+    const supabase = createSupabaseBrowser();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user?.email) setUserEmail(session.user.email);
+    });
+  }, []);
 
-    try {
-      const supabase = createSupabaseBrowser();
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session) {
-        setError('Please sign in first.');
-        setLoading(null);
-        return;
-      }
-
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-      const res = await fetch(`${apiUrl}/api/billing/checkout`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ plan }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || 'Failed to create checkout session.');
-        setLoading(null);
-        return;
-      }
-
-      // Redirect to Stripe Checkout
-      window.location.href = data.url;
-    } catch {
-      setError('Something went wrong. Please try again.');
-      setLoading(null);
-    }
-  };
+  const gumroadUrl = `https://thirmal.gumroad.com/l/onvhab${userEmail ? `?email=${encodeURIComponent(userEmail)}` : ''}`;
 
   return (
     <div>
@@ -116,11 +82,16 @@ export default function BillingPage() {
         </p>
       </div>
 
-      {error && (
-        <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-300 text-sm">
-          {error}
-        </div>
-      )}
+      {/* Gumroad payment notice */}
+      <div className="mb-8 p-4 bg-brand-500/10 border border-brand-500/30 rounded-xl flex items-start gap-3">
+        <ExternalLink className="h-5 w-5 text-brand-400 flex-shrink-0 mt-0.5" />
+        <p className="text-sm text-slate-300">
+          Payments are processed securely via{' '}
+          <span className="text-brand-300 font-semibold">Gumroad</span>.
+          Select your plan below and you&apos;ll be redirected to complete checkout.
+          Your account will be activated automatically after payment.
+        </p>
+      </div>
 
       <div className="grid md:grid-cols-3 gap-6">
         {plans.map((plan) => (
@@ -169,27 +140,19 @@ export default function BillingPage() {
               ))}
             </ul>
 
-            <button
-              onClick={() => handleCheckout(plan.key)}
-              disabled={loading !== null}
+            <a
+              href={gumroadUrl}
+              target="_blank"
+              rel="noopener noreferrer"
               className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-semibold transition-all ${
                 plan.highlight
                   ? 'bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-600/25'
                   : 'bg-white/10 hover:bg-white/20 text-white'
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
+              }`}
             >
-              {loading === plan.key ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Redirecting…
-                </>
-              ) : (
-                <>
-                  Get Started
-                  <ArrowRight className="h-4 w-4" />
-                </>
-              )}
-            </button>
+              Get Started
+              <ArrowRight className="h-4 w-4" />
+            </a>
           </div>
         ))}
       </div>
