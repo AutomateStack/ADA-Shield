@@ -14,6 +14,7 @@ import {
   Check,
   Star,
   ChevronRight,
+  ChevronDown,
 } from 'lucide-react';
 import { Navbar } from '@/components/ui/navbar';
 import { Footer } from '@/components/ui/footer';
@@ -302,6 +303,21 @@ export default function HomePage() {
                     href="/signup"
                   />
                 </div>
+              </div>
+            </section>
+
+            {/* ── FAQ Section ────────────────────────────────── */}
+            <section id="faq" className="py-20">
+              <div className="max-w-3xl mx-auto px-4">
+                <div className="text-center mb-12">
+                  <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
+                    Frequently Asked Questions
+                  </h2>
+                  <p className="text-slate-400">
+                    Everything you need to know about ADA compliance and how ADA Shield works.
+                  </p>
+                </div>
+                <FaqAccordion />
               </div>
             </section>
 
@@ -611,6 +627,102 @@ function RiskCalculator() {
         </div>
       )}
     </div>
+  );
+}
+
+const FAQ_ITEMS = [
+  {
+    question: 'What is ADA website compliance?',
+    answer:
+      'The Americans with Disabilities Act (ADA) requires that businesses provide equal access to people with disabilities. Courts have increasingly ruled that websites are "places of public accommodation" under Title III of the ADA, which means your website must be accessible to users who rely on screen readers, keyboard navigation, and other assistive technologies.',
+  },
+  {
+    question: 'What is WCAG 2.1 AA and why does it matter?',
+    answer:
+      'WCAG 2.1 AA (Web Content Accessibility Guidelines) is the internationally recognised technical standard for web accessibility. Meeting WCAG 2.1 AA is the most widely accepted way to demonstrate ADA compliance for websites. ADA Shield scans against all 50+ WCAG 2.1 AA criteria and shows you exactly which ones you are failing.',
+  },
+  {
+    question: 'How does the lawsuit risk score work?',
+    answer:
+      'Our 0–100 risk score is weighted by the violations that plaintiff attorneys target most often in ADA demand letters and lawsuits — such as missing image alt text, unlabelled form fields, and insufficient colour contrast. A score above 70 indicates serious exposure. The score is recalculated every time you scan so you can track your progress over time.',
+  },
+  {
+    question: 'Will fixing these issues break my website?',
+    answer:
+      'No. The fixes ADA Shield recommends are additive HTML/CSS changes — adding alt attributes, ARIA labels, and focus styles — that are invisible to sighted users and do not affect your site\'s design or functionality. We show you the exact HTML before and after so your developer can apply changes with confidence.',
+  },
+  {
+    question: 'How often should I scan my website?',
+    answer:
+      'You should scan every time you publish new content, add new pages, or update templates. Our paid plans include automatic weekly monitoring so that new violations are caught before a plaintiff attorney finds them first. You\'ll receive an email alert the moment your risk score changes.',
+  },
+  {
+    question: 'Is a free scan enough to protect my business?',
+    answer:
+      'The free scan gives you a snapshot of violations on a single page and shows up to 3 issues in detail. For full protection you need to scan all pages, monitor continuously, and track your risk score over time — that\'s what our Starter, Business, and Agency plans are designed for.',
+  },
+  {
+    question: 'What types of businesses get sued most often?',
+    answer:
+      'Healthcare providers, e-commerce retailers, restaurants, hotels, and financial services firms are the most common targets because they interact with the public and handle transactions online. However, any business with a public-facing website can receive a demand letter — we\'ve seen lawsuits filed against companies of every size.',
+  },
+  {
+    question: 'How is ADA Shield different from a one-time audit?',
+    answer:
+      'A one-time audit tells you what\'s wrong today. ADA Shield monitors continuously, so when your developer pushes a new feature that breaks accessibility, you know within a week — not after you receive a demand letter. We also provide the exact code fix for every violation, so remediation is fast and unambiguous.',
+  },
+];
+
+function FaqAccordion() {
+  const [open, setOpen] = useState<number | null>(null);
+
+  return (
+    <>
+      {/* FAQ JSON-LD schema for Google rich results */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            '@context': 'https://schema.org',
+            '@type': 'FAQPage',
+            mainEntity: FAQ_ITEMS.map((item) => ({
+              '@type': 'Question',
+              name: item.question,
+              acceptedAnswer: {
+                '@type': 'Answer',
+                text: item.answer,
+              },
+            })),
+          }),
+        }}
+      />
+      <div className="space-y-3">
+        {FAQ_ITEMS.map((item, i) => (
+          <div
+            key={i}
+            className="bg-white/5 border border-white/10 rounded-xl overflow-hidden hover:border-white/20 transition-colors"
+          >
+            <button
+              onClick={() => setOpen(open === i ? null : i)}
+              className="w-full flex items-center justify-between px-6 py-4 text-left gap-4"
+              aria-expanded={open === i}
+            >
+              <span className="text-sm font-semibold text-white">{item.question}</span>
+              <ChevronDown
+                className={`h-4 w-4 text-slate-400 flex-shrink-0 transition-transform duration-200 ${
+                  open === i ? 'rotate-180' : ''
+                }`}
+              />
+            </button>
+            {open === i && (
+              <div className="px-6 pb-5 text-sm text-slate-400 leading-relaxed border-t border-white/5 pt-4">
+                {item.answer}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
