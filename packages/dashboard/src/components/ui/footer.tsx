@@ -82,7 +82,7 @@ export function Footer() {
                   rel="noopener noreferrer"
                   className="text-brand-400 hover:text-brand-300 transition-colors"
                 >
-                  dataflowpro.bolt.host
+                  DataFlow Pro
                 </a>
               </li>
             </ul>
