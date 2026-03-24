@@ -55,7 +55,7 @@ function calculateRiskScore(violations) {
     for (const violation of violations) {
       const ruleId = violation.id;
       const impact = violation.impact || 'minor';
-      const nodeCount = violation.nodes ? violation.nodes.length : 1;
+      const nodeCount = (violation.affectedElements ?? violation.nodes)?.length ?? 1;
 
       if (LAWSUIT_TRIGGER_RULES[ruleId]) {
         const rule = LAWSUIT_TRIGGER_RULES[ruleId];

@@ -3,14 +3,14 @@
 import { useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronUp, ExternalLink, Copy, Check } from 'lucide-react';
 
-interface ViolationNode {
-  html: string;
-  target: string[];
-  failureSummary: string;
-  fix?: {
-    fixedHtml: string;
-    explanation: string;
-  };
+interface AffectedElement {
+  selector: string;
+  currentCode: string;
+  fixType: 'HTML' | 'CSS' | 'STRUCTURE' | 'REVIEW';
+  explanation: string;
+  suggestedFix: string;
+  actionRequired: string;
+  showCodeDiff: boolean;
 }
 
 interface Violation {
@@ -20,7 +20,7 @@ interface Violation {
   help: string;
   helpUrl: string;
   wcagTags: string[];
-  nodes: ViolationNode[];
+  affectedElements: AffectedElement[];
 }
 
 interface ViolationCardProps {
@@ -59,7 +59,7 @@ export function ViolationCard({ violation, index }: ViolationCardProps) {
           <div className="min-w-0">
             <h4 className="font-semibold text-white truncate">{violation.help}</h4>
             <p className="text-xs text-slate-500 mt-0.5">
-              {violation.nodes.length} instance{violation.nodes.length !== 1 ? 's' : ''} &middot; {violation.id}
+              {violation.affectedElements.length} instance{violation.affectedElements.length !== 1 ? 's' : ''} &middot; {violation.id}
             </p>
           </div>
         </div>
@@ -106,60 +106,119 @@ export function ViolationCard({ violation, index }: ViolationCardProps) {
 
           {/* Violation nodes */}
           <div className="space-y-4">
-            {violation.nodes.map((node, nodeIndex) => (
-              <div key={nodeIndex} className="rounded-lg border border-white/10 overflow-hidden">
-                {/* Broken code */}
-                <div className="relative">
-                  <div className="flex items-center justify-between px-3 py-1.5 bg-red-950/40 border-b border-red-500/20">
-                    <span className="text-xs text-red-400 font-semibold">Current Code</span>
-                    <button
-                      onClick={() => handleCopy(node.html, nodeIndex)}
-                      className="text-red-400 hover:text-red-300 p-1"
-                      title="Copy code"
-                    >
-                      {copiedIndex === nodeIndex ? (
-                        <Check className="h-3.5 w-3.5" />
-                      ) : (
-                        <Copy className="h-3.5 w-3.5" />
-                      )}
-                    </button>
-                  </div>
-                  <pre className="p-3 text-red-200 text-sm overflow-x-auto bg-red-950/20">
-                    {node.html}
-                  </pre>
+            {violation.affectedElements.map((element, elIndex) => (
+              <div key={elIndex} className="rounded-lg border border-white/10 overflow-hidden">
+
+                {/* Fix type badge */}
+                <div className="px-3 py-2 border-b border-white/5 flex items-center gap-2">
+                  {element.fixType === 'CSS' && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-blue-500/20 text-blue-300">
+                      CSS Change Required — not an HTML fix
+                    </span>
+                  )}
+                  {element.fixType === 'STRUCTURE' && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-purple-500/20 text-purple-300">
+                      Page Structure Fix Required
+                    </span>
+                  )}
+                  {element.fixType === 'HTML' && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-green-500/20 text-green-300">
+                      HTML Fix — copy and replace
+                    </span>
+                  )}
+                  {element.fixType === 'REVIEW' && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-slate-500/20 text-slate-300">
+                      Manual Review Required
+                    </span>
+                  )}
                 </div>
 
-                {/* Fix suggestion */}
-                {node.fix && (
+                {/* Plain-English explanation */}
+                <p className="px-3 py-2 text-slate-300 text-sm bg-white/5 border-b border-white/5">
+                  {element.explanation}
+                </p>
+
+                {/* Code diff (HTML violations only) */}
+                {element.showCodeDiff ? (
+                  <>
+                    {/* Current broken code */}
+                    <div className="relative">
+                      <div className="flex items-center justify-between px-3 py-1.5 bg-red-950/40 border-b border-red-500/20">
+                        <span className="text-xs text-red-400 font-semibold">Current Code</span>
+                        <button
+                          onClick={() => handleCopy(element.currentCode, elIndex)}
+                          className="text-red-400 hover:text-red-300 p-1"
+                          title="Copy current code"
+                        >
+                          {copiedIndex === elIndex ? (
+                            <Check className="h-3.5 w-3.5" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      </div>
+                      <pre className="p-3 text-red-200 text-sm overflow-x-auto bg-red-950/20">
+                        {element.currentCode}
+                      </pre>
+                    </div>
+
+                    {/* Suggested HTML fix */}
+                    <div className="relative">
+                      <div className="flex items-center justify-between px-3 py-1.5 bg-green-950/40 border-b border-green-500/20 border-t border-t-white/10">
+                        <span className="text-xs text-green-400 font-semibold">Suggested Fix</span>
+                        <button
+                          onClick={() => handleCopy(element.suggestedFix, -(elIndex + 1))}
+                          className="text-green-400 hover:text-green-300 p-1"
+                          title="Copy fix"
+                        >
+                          {copiedIndex === -(elIndex + 1) ? (
+                            <Check className="h-3.5 w-3.5" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      </div>
+                      <pre className="p-3 text-green-200 text-sm overflow-x-auto bg-green-950/20">
+                        {element.suggestedFix}
+                      </pre>
+                    </div>
+                  </>
+                ) : (
+                  /* CSS / STRUCTURE / REVIEW — show instructions block */
                   <div className="relative">
-                    <div className="flex items-center justify-between px-3 py-1.5 bg-green-950/40 border-b border-green-500/20 border-t border-t-white/10">
-                      <span className="text-xs text-green-400 font-semibold">Suggested Fix</span>
+                    <div className="flex items-center justify-between px-3 py-1.5 bg-brand-900/40 border-b border-brand-500/20">
+                      <span className="text-xs text-brand-300 font-semibold">How to Fix</span>
                       <button
-                        onClick={() => handleCopy(node.fix!.fixedHtml, -(nodeIndex + 1))}
-                        className="text-green-400 hover:text-green-300 p-1"
-                        title="Copy fix"
+                        onClick={() => handleCopy(element.suggestedFix, -(elIndex + 1))}
+                        className="text-brand-400 hover:text-brand-300 p-1"
+                        title="Copy instructions"
                       >
-                        {copiedIndex === -(nodeIndex + 1) ? (
+                        {copiedIndex === -(elIndex + 1) ? (
                           <Check className="h-3.5 w-3.5" />
                         ) : (
                           <Copy className="h-3.5 w-3.5" />
                         )}
                       </button>
                     </div>
-                    <pre className="p-3 text-green-200 text-sm overflow-x-auto bg-green-950/20">
-                      {node.fix.fixedHtml}
+                    <pre className="p-3 text-slate-300 text-sm overflow-x-auto bg-white/5 whitespace-pre-wrap">
+                      {element.suggestedFix}
                     </pre>
-                    <p className="px-3 py-2 text-slate-400 text-xs bg-white/5 border-t border-white/5">
-                      {node.fix.explanation}
-                    </p>
                   </div>
                 )}
 
-                {/* CSS selector target */}
-                {node.target && node.target.length > 0 && (
+                {/* Action required summary */}
+                <div className="px-3 py-2 bg-white/5 border-t border-white/5 flex items-start gap-2">
+                  <span className="text-xs font-semibold text-amber-400 whitespace-nowrap flex-shrink-0">
+                    Action needed:
+                  </span>
+                  <span className="text-xs text-slate-300">{element.actionRequired}</span>
+                </div>
+
+                {/* CSS selector */}
+                {element.selector && (
                   <div className="px-3 py-2 bg-white/5 border-t border-white/5">
                     <span className="text-xs text-slate-500">Selector: </span>
-                    <code className="text-xs text-slate-400">{node.target.join(' > ')}</code>
+                    <code className="text-xs text-slate-400">{element.selector}</code>
                   </div>
                 )}
               </div>
