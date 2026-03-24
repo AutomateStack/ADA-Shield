@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { logger } = require('./utils/logger');
+const { generateFix } = require('./fix-suggester');
 
 // Resolve Chrome executable path by searching known cache locations.
 // This handles cases where PUPPETEER_CACHE_DIR env var is set at build time
@@ -185,79 +186,19 @@ function formatViolation(violation) {
         t.startsWith('best-practice') ||
         t.startsWith('section508')
     ),
-    nodes: violation.nodes.map((node) => ({
-      html: node.html,
-      target: node.target,
-      failureSummary: node.failureSummary,
-      fix: generateFix(violation.id, node),
-    })),
+    affectedElements: violation.nodes.map((node) => {
+      const fix = generateFix(violation.id, node, violation);
+      return {
+        selector: node.target?.[0],
+        currentCode: node.html,
+        fixType: fix.fixType,
+        explanation: fix.explanation,
+        suggestedFix: fix.suggestedFix,
+        actionRequired: fix.actionRequired,
+        showCodeDiff: fix.showCodeDiff,
+      };
+    }),
   };
 }
 
-/**
- * Generates a concrete code fix suggestion for a violation node.
- * @param {string} ruleId - The axe-core rule ID (e.g. 'image-alt').
- * @param {object} node - The axe-core node object.
- * @returns {object} An object with fixedHtml and explanation.
- */
-function generateFix(ruleId, node) {
-  const html = node.html || '';
-  let fixedHtml = html;
-  let explanation = '';
-
-  switch (ruleId) {
-    case 'image-alt': {
-      if (html.includes('<img')) {
-        fixedHtml = html.replace(/<img/, '<img alt="Descriptive text here"');
-        explanation =
-          'Add a descriptive alt attribute that conveys the purpose of the image.';
-      }
-      break;
-    }
-    case 'color-contrast': {
-      explanation =
-        'Increase the contrast ratio between foreground text and background color ' +
-        'to at least 4.5:1 for normal text or 3:1 for large text. ' +
-        'Use a contrast checker to find compliant color combinations.';
-      fixedHtml = html + ' /* Update CSS: increase color contrast ratio */';
-      break;
-    }
-    case 'label': {
-      if (html.includes('<input')) {
-        const idMatch = html.match(/id="([^"]+)"/);
-        const id = idMatch ? idMatch[1] : 'input-id';
-        fixedHtml = `<label for="${id}">Field label</label>\n${html}`;
-        explanation = 'Add a <label> element associated with this form input using the for attribute.';
-      }
-      break;
-    }
-    case 'link-name': {
-      fixedHtml = html.replace(/<a /, '<a aria-label="Descriptive link text" ');
-      explanation =
-        'Add descriptive text content or an aria-label to the link so screen readers can announce it.';
-      break;
-    }
-    case 'button-name': {
-      fixedHtml = html.replace(/<button/, '<button aria-label="Button purpose"');
-      explanation =
-        'Add text content or an aria-label to the button describing its action.';
-      break;
-    }
-    case 'html-has-lang': {
-      fixedHtml = '<html lang="en">';
-      explanation =
-        'Add a lang attribute to the <html> element to declare the page language.';
-      break;
-    }
-    default: {
-      explanation =
-        node.failureSummary ||
-        'Review the violation details at the helpUrl and apply the recommended fix.';
-      break;
-    }
-  }
-
-  return { fixedHtml, explanation };
-}
-
-module.exports = { scanPage, formatViolation, generateFix };
+module.exports = { scanPage, formatViolation };
