@@ -89,8 +89,19 @@ export function Footer() {
           </div>
         </div>
 
-        <div className="mt-8 pt-8 border-t border-white/10 text-center text-sm text-slate-500">
-          &copy; {new Date().getFullYear()} ADA Shield. All rights reserved.
+        <div className="mt-8 pt-8 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-2 text-sm text-slate-500">
+          <span>&copy; {new Date().getFullYear()} ADA Shield. All rights reserved.</span>
+          <span>
+            Data Consultant:{' '}
+            <a
+              href="https://dataflowpro.bolt.host/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-brand-400 hover:text-brand-300 transition-colors"
+            >
+              dataflowpro.bolt.host
+            </a>
+          </span>
         </div>
       </div>
     </footer>

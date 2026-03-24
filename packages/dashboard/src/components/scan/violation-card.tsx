@@ -32,11 +32,27 @@ export function ViolationCard({ violation, index }: ViolationCardProps) {
   const [expanded, setExpanded] = useState(index === 0);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
-  const impactStyles: Record<string, { bg: string; text: string; icon: string }> = {
-    critical: { bg: 'bg-red-500/20', text: 'text-red-300', icon: 'text-red-400' },
-    serious: { bg: 'bg-orange-500/20', text: 'text-orange-300', icon: 'text-orange-400' },
-    moderate: { bg: 'bg-yellow-500/20', text: 'text-yellow-300', icon: 'text-yellow-400' },
-    minor: { bg: 'bg-blue-500/20', text: 'text-blue-300', icon: 'text-blue-400' },
+  const impactStyles: Record<string, { bg: string; text: string; icon: string; alertBg: string; alertText: string; alertBorder: string; cardBorder: string }> = {
+    critical: {
+      bg: 'bg-red-500/20', text: 'text-red-300', icon: 'text-red-400',
+      alertBg: 'bg-red-950/50', alertText: 'text-red-200', alertBorder: 'border-l-4 border-l-red-500 border-b border-red-500/20',
+      cardBorder: 'border-l-4 border-l-red-500',
+    },
+    serious: {
+      bg: 'bg-orange-500/20', text: 'text-orange-300', icon: 'text-orange-400',
+      alertBg: 'bg-orange-950/50', alertText: 'text-orange-200', alertBorder: 'border-l-4 border-l-orange-500 border-b border-orange-500/20',
+      cardBorder: 'border-l-4 border-l-orange-500',
+    },
+    moderate: {
+      bg: 'bg-yellow-500/20', text: 'text-yellow-300', icon: 'text-yellow-400',
+      alertBg: 'bg-yellow-950/40', alertText: 'text-yellow-200', alertBorder: 'border-l-4 border-l-yellow-500 border-b border-yellow-500/20',
+      cardBorder: 'border-l-4 border-l-yellow-500',
+    },
+    minor: {
+      bg: 'bg-blue-500/20', text: 'text-blue-300', icon: 'text-blue-400',
+      alertBg: 'bg-blue-950/30', alertText: 'text-blue-200', alertBorder: 'border-l-4 border-l-blue-500 border-b border-blue-500/20',
+      cardBorder: 'border-l-4 border-l-blue-400',
+    },
   };
 
   const style = impactStyles[violation.impact] || impactStyles.minor;
@@ -107,7 +123,7 @@ export function ViolationCard({ violation, index }: ViolationCardProps) {
           {/* Violation nodes */}
           <div className="space-y-4">
             {violation.affectedElements.map((element, elIndex) => (
-              <div key={elIndex} className="rounded-lg border border-white/10 overflow-hidden">
+              <div key={elIndex} className={`rounded-lg border border-white/10 overflow-hidden ${style.cardBorder}`}>
 
                 {/* Fix type badge */}
                 <div className="px-3 py-2 border-b border-white/5 flex items-center gap-2">
@@ -133,10 +149,11 @@ export function ViolationCard({ violation, index }: ViolationCardProps) {
                   )}
                 </div>
 
-                {/* Plain-English explanation */}
-                <p className="px-3 py-2 text-slate-300 text-sm bg-white/5 border-b border-white/5">
-                  {element.explanation}
-                </p>
+                {/* Plain-English explanation — alert-coloured based on impact */}
+                <div className={`px-3 py-2.5 text-sm flex items-start gap-2 ${style.alertBg} ${style.alertBorder}`}>
+                  <AlertTriangle className={`h-4 w-4 flex-shrink-0 mt-0.5 ${style.icon}`} />
+                  <p className={`${style.alertText} leading-snug`}>{element.explanation}</p>
+                </div>
 
                 {/* Code diff (HTML violations only) */}
                 {element.showCodeDiff ? (
