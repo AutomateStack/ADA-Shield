@@ -7,7 +7,7 @@ const helmet = require('helmet');
 const { logger } = require('./utils/logger');
 const { validateConfig } = require('./utils/config');
 const { scanRoutes } = require('./routes/scan');
-const { webhookRoutes } = require('./routes/webhooks');
+const { webhookRoutes, gumroadWebhookRoutes } = require('./routes/webhooks');
 const { internalRoutes } = require('./routes/internal');
 const { billingRoutes } = require('./routes/billing');
 const { notificationRoutes } = require('./routes/notifications');
@@ -23,6 +23,8 @@ const PORT = process.env.PORT || 4000;
 // ── Global Middleware ───────────────────────────────────────────────
 // Stripe webhooks need raw body, so mount webhook route BEFORE json parser
 app.use('/api/webhooks/stripe', webhookRoutes);
+// Gumroad sends urlencoded body — mount before json parser too
+app.use('/api/webhooks/gumroad', gumroadWebhookRoutes);
 
 app.use(helmet());
 

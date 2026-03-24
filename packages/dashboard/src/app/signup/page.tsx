@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Shield, Loader2, AlertCircle, CheckCircle, Check } from 'lucide-react';
+import { Shield, Loader2, AlertCircle, CheckCircle, Check, ArrowRight } from 'lucide-react';
 import { createSupabaseBrowser } from '@/lib/supabase/client';
 
 export default function SignupPage() {
@@ -55,13 +55,33 @@ export default function SignupPage() {
           <div className="bg-white/5 border border-white/10 rounded-2xl p-8">
             <CheckCircle className="h-12 w-12 text-green-400 mx-auto mb-4" />
             <h1 className="text-2xl font-bold text-white mb-2">Check Your Email</h1>
-            <p className="text-slate-400 text-sm">
+            <p className="text-slate-400 text-sm mb-6">
               We&apos;ve sent a confirmation link to <strong className="text-white">{email}</strong>.
               Click the link to activate your account.
             </p>
+
+            {/* Step 2 — pay after confirming */}
+            <div className="bg-brand-500/10 border border-brand-500/30 rounded-xl p-4 mb-6 text-left">
+              <p className="text-xs font-semibold text-brand-300 uppercase tracking-wide mb-1">
+                Step 2 — Complete your purchase
+              </p>
+              <p className="text-sm text-slate-300 mb-3">
+                Once you confirm your email, activate your plan on Gumroad to unlock full access.
+              </p>
+              <a
+                href="https://thirmal.gumroad.com/l/onvhab"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold rounded-lg transition-colors"
+              >
+                Activate Your Plan
+                <ArrowRight className="h-4 w-4" />
+              </a>
+            </div>
+
             <Link
               href="/login"
-              className="inline-block mt-6 px-6 py-3 bg-brand-600 hover:bg-brand-700 text-white font-semibold rounded-lg transition-colors"
+              className="inline-block px-6 py-3 bg-white/10 hover:bg-white/20 text-white font-semibold rounded-lg transition-colors text-sm"
             >
               Go to Sign In
             </Link>
