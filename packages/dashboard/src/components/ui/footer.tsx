@@ -80,7 +80,7 @@ export function Footer() {
                   href="https://dataflowpro.bolt.host/"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-brand-400 hover:text-brand-300 transition-colors"
+                  className="text-slate-400 hover:text-white transition-colors"
                 >
                   DataFlow Pro
                 </a>
