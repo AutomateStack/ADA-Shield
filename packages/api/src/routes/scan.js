@@ -5,7 +5,7 @@ const { calculateRiskScore } = require('@ada-shield/scanner');
 const { getUserSubscription, PLAN_LIMITS } = require('../db/subscriptions');
 const { getUserSites, getUserSiteById } = require('../db/sites');
 const { saveScanResult, updateSiteLastScanned, getPublicScanByToken } = require('../db/scans');
-const { createRateLimiter } = require('../middleware/rate-limiter');
+const { createRateLimiter, createUserRateLimiter } = require('../middleware/rate-limiter');
 const { authenticate } = require('../middleware/auth');
 const { logger } = require('../utils/logger');
 const { enqueueScanJob, getScanJobStatus, getScanQueue } = require('../services/scan-queue');
@@ -111,9 +111,11 @@ router.post(
 );
 
 // ── Authenticated Scan Endpoint ─────────────────────────────────────
+// Rate limited: 20 scans per 15 minutes per user
 router.post(
   '/run',
   authenticate,
+  createUserRateLimiter({ windowMs: 15 * 60 * 1000, max: 20 }),
   async (req, res, next) => {
     try {
       const parsed = authenticatedScanSchema.safeParse(req.body);
@@ -277,6 +279,70 @@ router.get('/report/:token', async (req, res, next) => {
     next(error);
   }
 });
+
+// ── Scan Diff / Comparison Endpoint ─────────────────────────────────
+// Compares latest scan with previous scan to show what changed.
+router.get(
+  '/diff/:siteId',
+  authenticate,
+  async (req, res, next) => {
+    try {
+      const { siteId } = req.params;
+      const userId = req.user.id;
+
+      const site = await getUserSiteById(siteId, userId);
+      if (!site) {
+        return res.status(404).json({ error: 'Site not found' });
+      }
+
+      const { getScanResults } = require('../db/scans');
+      const results = await getScanResults(siteId, 2);
+
+      if (results.length < 2) {
+        return res.json({
+          hasPrevious: false,
+          message: 'Need at least 2 scans to compare.',
+          latest: results[0] || null,
+        });
+      }
+
+      const [latest, previous] = results;
+
+      // Violation-level diff: what's new, what's fixed, what persists
+      const latestIds = new Set((latest.violations || []).map((v) => v.id));
+      const previousIds = new Set((previous.violations || []).map((v) => v.id));
+
+      const newViolations = (latest.violations || []).filter((v) => !previousIds.has(v.id));
+      const fixedViolations = (previous.violations || []).filter((v) => !latestIds.has(v.id));
+      const persistingViolations = (latest.violations || []).filter((v) => previousIds.has(v.id));
+
+      return res.json({
+        hasPrevious: true,
+        latest: {
+          id: latest.id,
+          scannedAt: latest.scanned_at,
+          riskScore: latest.risk_score,
+          totalViolations: latest.total_violations,
+        },
+        previous: {
+          id: previous.id,
+          scannedAt: previous.scanned_at,
+          riskScore: previous.risk_score,
+          totalViolations: previous.total_violations,
+        },
+        diff: {
+          riskScoreChange: latest.risk_score - previous.risk_score,
+          violationCountChange: latest.total_violations - previous.total_violations,
+          newViolations: newViolations.map((v) => ({ id: v.id, impact: v.impact, description: v.description })),
+          fixedViolations: fixedViolations.map((v) => ({ id: v.id, impact: v.impact, description: v.description })),
+          persistingCount: persistingViolations.length,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 const scanRoutes = router;
 module.exports = { scanRoutes };

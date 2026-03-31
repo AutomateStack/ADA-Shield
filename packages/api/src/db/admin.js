@@ -38,10 +38,13 @@ async function getAdminStats() {
       .select('*', { count: 'exact', head: true })
       .gte('scanned_at', since7d);
 
-    // Average risk score
+    // Average risk score — use limited sample for performance instead of fetching all rows
     const { data: avgData } = await supabase
       .from('scan_results')
-      .select('risk_score');
+      .select('risk_score')
+      .not('risk_score', 'is', null)
+      .order('scanned_at', { ascending: false })
+      .limit(1000);
     const avgRiskScore = avgData && avgData.length > 0
       ? Math.round(avgData.reduce((sum, r) => sum + (r.risk_score || 0), 0) / avgData.length)
       : 0;
@@ -108,17 +111,24 @@ async function getAdminScans({ page = 1, limit = 20, type } = {}) {
  */
 async function getTopScannedUrls(limit = 10) {
   try {
+    // Fetch only recent URLs (last 10k) to avoid loading entire table into memory
     const { data, error } = await supabase
       .from('scan_results')
-      .select('url');
+      .select('url')
+      .order('scanned_at', { ascending: false })
+      .limit(10000);
 
     if (error) throw error;
 
-    // Aggregate by URL in JS
+    // Aggregate by hostname in JS
     const counts = {};
     for (const row of (data || [])) {
-      const hostname = new URL(row.url).hostname;
-      counts[hostname] = (counts[hostname] || 0) + 1;
+      try {
+        const hostname = new URL(row.url).hostname;
+        counts[hostname] = (counts[hostname] || 0) + 1;
+      } catch {
+        // Skip malformed URLs
+      }
     }
 
     return Object.entries(counts)
@@ -149,37 +159,54 @@ async function getAdminUsers({ page = 1, limit = 20 } = {}) {
 
     if (error) throw error;
 
-    // Enrich each user with site + scan counts
-    const enriched = await Promise.all(
-      (users || []).map(async (user) => {
-        const [
-          { count: siteCount },
-          { count: scanCount },
-        ] = await Promise.all([
-          supabase.from('sites').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
-          supabase.from('scan_results').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
-        ]);
+    // Batch-fetch all enrichment data for the user IDs in one go (avoids N+1)
+    const userIds = (users || []).map((u) => u.id);
 
-        // Get subscription
-        const { data: sub } = await supabase
-          .from('subscriptions')
-          .select('plan, status')
-          .eq('user_id', user.id)
-          .limit(1)
-          .maybeSingle();
+    const [siteCounts, scanCounts, subscriptions] = await Promise.all([
+      // Batch site counts
+      supabase
+        .from('sites')
+        .select('user_id')
+        .in('user_id', userIds),
+      // Batch scan counts
+      supabase
+        .from('scan_results')
+        .select('user_id')
+        .in('user_id', userIds),
+      // Batch subscriptions
+      supabase
+        .from('subscriptions')
+        .select('user_id, plan, status')
+        .in('user_id', userIds),
+    ]);
 
-        return {
-          id: user.id,
-          email: user.email,
-          createdAt: user.created_at,
-          lastSignIn: user.last_sign_in_at,
-          siteCount: siteCount || 0,
-          scanCount: scanCount || 0,
-          plan: sub?.plan || 'free',
-          subscriptionStatus: sub?.status || null,
-        };
-      })
-    );
+    // Build lookup maps
+    const siteCountMap = {};
+    for (const row of (siteCounts.data || [])) {
+      siteCountMap[row.user_id] = (siteCountMap[row.user_id] || 0) + 1;
+    }
+    const scanCountMap = {};
+    for (const row of (scanCounts.data || [])) {
+      scanCountMap[row.user_id] = (scanCountMap[row.user_id] || 0) + 1;
+    }
+    const subMap = {};
+    for (const row of (subscriptions.data || [])) {
+      if (!subMap[row.user_id]) subMap[row.user_id] = row;
+    }
+
+    const enriched = (users || []).map((user) => {
+      const sub = subMap[user.id];
+      return {
+        id: user.id,
+        email: user.email,
+        createdAt: user.created_at,
+        lastSignIn: user.last_sign_in_at,
+        siteCount: siteCountMap[user.id] || 0,
+        scanCount: scanCountMap[user.id] || 0,
+        plan: sub?.plan || 'free',
+        subscriptionStatus: sub?.status || null,
+      };
+    });
 
     return {
       users: enriched,

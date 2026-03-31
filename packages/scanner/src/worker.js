@@ -1,4 +1,5 @@
 const { createScanWorker } = require('./queue');
+const { closeBrowserPool } = require('./scan');
 const { validateConfig } = require('./utils/config');
 const { logger } = require('./utils/logger');
 
@@ -30,6 +31,7 @@ async function startWorker() {
     const shutdown = async () => {
       logger.info('Shutting down worker...');
       await worker.close();
+      await closeBrowserPool();
       process.exit(0);
     };
 

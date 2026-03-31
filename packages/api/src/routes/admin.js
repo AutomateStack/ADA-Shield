@@ -1,4 +1,5 @@
 const { Router } = require('express');
+const crypto = require('crypto');
 const { logger } = require('../utils/logger');
 const {
   getAdminStats,
@@ -13,11 +14,19 @@ const router = Router();
 
 /**
  * Admin auth middleware — validates INTERNAL_API_SECRET header.
- * Used for all admin routes to protect sensitive data.
+ * Uses timing-safe comparison to prevent timing attacks.
  */
 function adminAuth(req, res, next) {
   const secret = req.headers['x-admin-secret'];
-  if (!secret || secret !== process.env.INTERNAL_API_SECRET) {
+  const expected = process.env.INTERNAL_API_SECRET;
+  if (!secret || !expected) {
+    return res.status(401).json({ error: 'Unauthorized — invalid admin secret' });
+  }
+
+  // Timing-safe comparison to prevent side-channel attacks
+  const secretBuf = Buffer.from(String(secret));
+  const expectedBuf = Buffer.from(String(expected));
+  if (secretBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(secretBuf, expectedBuf)) {
     return res.status(401).json({ error: 'Unauthorized — invalid admin secret' });
   }
   next();

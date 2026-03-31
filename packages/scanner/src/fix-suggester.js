@@ -25,22 +25,49 @@ function generateFix(violationId, node, violation) {
       explanation:
         "This element's text colour does not have enough contrast against its background. " +
         'The HTML is correct — the fix must be made in your CSS file.',
-      suggestedFix: `/* 
-  STEP 1: Find this element in your CSS
+      suggestedFix: (() => {
+        // Extract contrast data from axe-core failure summary if available
+        const fgMatch = node.failureSummary?.match(/foreground color: (#[0-9a-fA-F]{3,8}|rgb[a]?\([^)]+\))/i);
+        const bgMatch = node.failureSummary?.match(/background color: (#[0-9a-fA-F]{3,8}|rgb[a]?\([^)]+\))/i);
+        const ratioMatch = node.failureSummary?.match(/contrast ratio of ([\d.]+)/i);
+
+        const currentFg = fgMatch ? fgMatch[1] : 'unknown';
+        const currentBg = bgMatch ? bgMatch[1] : 'unknown';
+        const ratio = ratioMatch ? ratioMatch[1] : 'below minimum';
+
+        // Pre-computed accessible dark text options on common backgrounds
+        const safeTextColors = {
+          dark: '#1a1a1a',    // works on any light bg (19:1 on white)
+          medium: '#2d2d2d',  // works on light grays (15:1 on #f5f5f5)
+          onDark: '#e8e8e8',  // works on dark bg (13:1 on #1a1a1a)
+        };
+
+        return `/* 
+  CURRENT ISSUE:
   Selector: ${node.target?.[0] || 'see element above'}
+  Foreground: ${currentFg}
+  Background: ${currentBg}
+  Current contrast ratio: ${ratio} (minimum required: 4.5:1)
   
-  STEP 2: Check current colours at:
+  RECOMMENDED FIX — choose one:
+  
+  Option A: Darken the text (if background is light)
+    color: ${safeTextColors.dark};  /* 19:1 contrast on white */
+  
+  Option B: Lighten the text (if background is dark)
+    color: ${safeTextColors.onDark};  /* 13:1 contrast on #1a1a1a */
+  
+  Option C: Increase background lightness
+    background-color: #ffffff;
+  
+  VERIFY YOUR FIX:
   https://webaim.org/resources/contrastchecker/
   
-  STEP 3: Update your CSS to meet these minimums:
+  MINIMUMS:
   - Normal text (under 18pt): ratio must be 4.5:1 or higher
   - Large text (18pt+ or 14pt bold): ratio must be 3:1 or higher
-  
-  STEP 4: Common fixes:
-  → Make text darker (lower the lightness value)
-  → Make background lighter
-  → Example: color: #1a1a1a on white background = 19:1 ratio ✓
-*/`,
+*/`;
+      })(),
       actionRequired: 'Update CSS colour values — not HTML',
     },
 

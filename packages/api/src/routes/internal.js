@@ -1,4 +1,5 @@
 const { Router } = require('express');
+const crypto = require('crypto');
 const { getMonitoredSites } = require('../db/sites');
 const { saveScanResult, getLatestScanResult, updateSiteLastScanned } = require('../db/scans');
 const { getNotificationPrefs } = require('../db/notifications');
@@ -10,6 +11,16 @@ const { logger } = require('../utils/logger');
 const router = Router();
 
 /**
+ * Timing-safe secret comparison helper.
+ */
+function verifySecret(provided, expected) {
+  if (!provided || !expected) return false;
+  const a = Buffer.from(String(provided));
+  const b = Buffer.from(String(expected));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/**
  * Internal endpoint to trigger weekly monitoring scans.
  * Runs scans synchronously (no Redis required), saves results, sends emails.
  * Protected by INTERNAL_API_SECRET header.
@@ -18,7 +29,7 @@ router.post('/trigger-weekly-scan', async (req, res, next) => {
   try {
     // Verify internal API secret
     const secret = req.headers['x-internal-secret'];
-    if (secret !== process.env.INTERNAL_API_SECRET) {
+    if (!verifySecret(secret, process.env.INTERNAL_API_SECRET)) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
