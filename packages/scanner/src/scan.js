@@ -6,6 +6,56 @@ const os = require('os');
 const { logger } = require('./utils/logger');
 const { generateFix } = require('./fix-suggester');
 
+// ── Browser Pool ────────────────────────────────────────────────────
+// Reuses browser instances to avoid ~8s launch overhead per scan.
+// Automatically recycles after MAX_PAGES_PER_BROWSER to prevent memory leaks.
+const MAX_PAGES_PER_BROWSER = 20;
+let _browserInstance = null;
+let _browserPageCount = 0;
+let _browserLock = Promise.resolve();
+
+/**
+ * Gets or creates a shared browser instance.
+ * Thread-safe via promise chain lock.
+ */
+async function getBrowser() {
+  _browserLock = _browserLock.then(async () => {
+    if (_browserInstance && _browserInstance.isConnected() && _browserPageCount < MAX_PAGES_PER_BROWSER) {
+      _browserPageCount++;
+      return;
+    }
+    // Close stale browser if exists
+    if (_browserInstance) {
+      try { await _browserInstance.close(); } catch { /* ignore */ }
+      _browserInstance = null;
+    }
+    const executablePath = getChromePath();
+    logger.info('Launching Chrome (pooled)', { executablePath: executablePath || 'puppeteer default' });
+    _browserInstance = await puppeteer.launch({
+      headless: true,
+      executablePath,
+      args: BROWSER_ARGS,
+      timeout: 30000,
+    });
+    _browserPageCount = 1;
+  });
+  await _browserLock;
+  return _browserInstance;
+}
+
+/**
+ * Gracefully shuts down the browser pool.
+ * Call on process exit / SIGTERM.
+ */
+async function closeBrowserPool() {
+  if (_browserInstance) {
+    try { await _browserInstance.close(); } catch { /* ignore */ }
+    _browserInstance = null;
+    _browserPageCount = 0;
+    logger.info('Browser pool closed');
+  }
+}
+
 // Resolve Chrome executable path by searching known cache locations.
 // This handles cases where PUPPETEER_CACHE_DIR env var is set at build time
 // but not at runtime (e.g. Render free tier with render.yaml env vars not
@@ -71,26 +121,36 @@ const DEFAULT_NAV_OPTIONS = {
  */
 async function scanPage(url, options = {}) {
   const startTime = Date.now();
-  let browser = null;
+  let page = null;
+  let usedPool = false;
 
   try {
     logger.info('Starting scan', { url });
 
-    // Resolve Chrome path at call-time so PUPPETEER_CACHE_DIR is fully set
-    const executablePath = getChromePath();
-    logger.info('Launching Chrome', { executablePath: executablePath || 'puppeteer default' });
+    let browser;
+    try {
+      // Try pooled browser first (faster)
+      browser = await getBrowser();
+      usedPool = true;
+    } catch (poolErr) {
+      // Fallback to standalone browser if pool fails
+      logger.warn('Browser pool failed, launching standalone', { error: poolErr.message });
+      const executablePath = getChromePath();
+      browser = await puppeteer.launch({
+        headless: true,
+        executablePath,
+        args: BROWSER_ARGS,
+        timeout: 30000,
+      });
+    }
 
-    browser = await puppeteer.launch({
-      headless: true,
-      executablePath,
-      args: BROWSER_ARGS,
-      timeout: 30000,
-    });
-    const page = await browser.newPage();
+    page = await browser.newPage();
 
-    // Set a realistic viewport and user agent
-    await page.setViewport({ width: 1280, height: 1024 });
+    // Set viewport — customizable for mobile scanning
+    const viewport = options.viewport || { width: 1280, height: 1024 };
+    await page.setViewport(viewport);
     await page.setUserAgent(
+      options.userAgent ||
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
       '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
@@ -161,8 +221,9 @@ async function scanPage(url, options = {}) {
     logger.error('Scan failed', { url, error: error.message });
     throw new Error(`Scan failed for ${url}: ${error.message}`);
   } finally {
-    if (browser) {
-      await browser.close();
+    // Close the page, not the browser (pool manages browser lifecycle)
+    if (page) {
+      try { await page.close(); } catch { /* ignore */ }
     }
   }
 }
@@ -201,4 +262,70 @@ function formatViolation(violation) {
   };
 }
 
-module.exports = { scanPage, formatViolation };
+/**
+ * Scans a page at both desktop (1280×1024) and mobile (375×812) viewports
+ * and merges unique violations from both. Mobile-only violations are tagged.
+ * @param {string} url - The URL to scan.
+ * @param {object} [options] - Optional configuration.
+ * @returns {Promise<object>} Merged scan results with viewport annotations.
+ */
+async function scanPageMultiViewport(url, options = {}) {
+  const startTime = Date.now();
+
+  // Desktop scan (default)
+  const desktopResult = await scanPage(url, options);
+
+  // Mobile scan with iPhone-like viewport
+  let mobileResult;
+  try {
+    mobileResult = await scanPage(url, {
+      ...options,
+      viewport: { width: 375, height: 812 },
+      userAgent:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) ' +
+        'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    });
+  } catch (err) {
+    logger.warn('Mobile viewport scan failed, using desktop-only results', { url, error: err.message });
+    return desktopResult;
+  }
+
+  // Merge violations: desktop violations keep original, mobile-only get tagged
+  const desktopViolationKeys = new Set(
+    desktopResult.violations.map((v) => v.id)
+  );
+
+  const mobileOnlyViolations = mobileResult.violations
+    .filter((v) => !desktopViolationKeys.has(v.id))
+    .map((v) => ({ ...v, viewport: 'mobile-only' }));
+
+  const mergedViolations = [
+    ...desktopResult.violations.map((v) => ({ ...v, viewport: 'desktop' })),
+    ...mobileOnlyViolations,
+  ];
+
+  const totalViolations = mergedViolations.reduce(
+    (sum, v) => sum + (v.affectedElements?.length || 0),
+    0
+  );
+
+  const counts = { critical: 0, serious: 0, moderate: 0, minor: 0 };
+  for (const v of mergedViolations) {
+    const impact = v.impact || 'minor';
+    counts[impact] = (counts[impact] || 0) + (v.affectedElements?.length || 0);
+  }
+
+  return {
+    ...desktopResult,
+    totalViolations,
+    criticalCount: counts.critical,
+    seriousCount: counts.serious,
+    moderateCount: counts.moderate,
+    minorCount: counts.minor,
+    violations: mergedViolations,
+    mobileOnlyViolationCount: mobileOnlyViolations.length,
+    scanDurationMs: Date.now() - startTime,
+  };
+}
+
+module.exports = { scanPage, scanPageMultiViewport, formatViolation, closeBrowserPool };

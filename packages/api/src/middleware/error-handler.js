@@ -5,8 +5,11 @@ const { logger } = require('../utils/logger');
  * Catches all unhandled errors and returns a consistent JSON response.
  * Never exposes internal error details in production.
  */
-function errorHandler(err, _req, res, _next) {
+function errorHandler(err, req, res, _next) {
+  const requestId = req.requestId || 'unknown';
+
   logger.error('Unhandled error', {
+    requestId,
     message: err.message,
     stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
   });
@@ -19,6 +22,7 @@ function errorHandler(err, _req, res, _next) {
 
   res.status(statusCode).json({
     error: message,
+    requestId,
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
   });
 }

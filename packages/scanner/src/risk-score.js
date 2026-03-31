@@ -37,6 +37,11 @@ const RISK_LEVELS = {
 /**
  * Calculates the ADA lawsuit risk score (0–100) from scan violations.
  *
+ * Uses a logarithmic diminishing-returns model: the first few critical
+ * violations shoot the score up fast, but additional violations of the 
+ * same type have decreasing impact. This more accurately reflects real
+ * lawsuit risk (1 image-alt violation on 50 images ≠ 50× the risk of 1).
+ *
  * Lawsuit-triggering rules (color-contrast, image-alt, label, link-name,
  * button-name, html-has-lang) are weighted more heavily. All other
  * violations use standard impact-level scoring.
@@ -50,12 +55,17 @@ function calculateRiskScore(violations) {
     const breakdown = {
       lawsuitTriggers: {},
       generalViolations: { critical: 0, serious: 0, moderate: 0, minor: 0 },
+      uniqueRuleCount: 0,
     };
+
+    // Track unique violation types for diversity bonus
+    const uniqueRules = new Set();
 
     for (const violation of violations) {
       const ruleId = violation.id;
       const impact = violation.impact || 'minor';
       const nodeCount = (violation.affectedElements ?? violation.nodes)?.length ?? 1;
+      uniqueRules.add(ruleId);
 
       if (LAWSUIT_TRIGGER_RULES[ruleId]) {
         const rule = LAWSUIT_TRIGGER_RULES[ruleId];
@@ -67,20 +77,30 @@ function calculateRiskScore(violations) {
           breakdown.lawsuitTriggers[ruleId] = points;
         } else {
           const pointsPer = rule[impact] || rule.serious;
-          const points = pointsPer * nodeCount;
+          // Diminishing returns: first node gets full points, subsequent nodes
+          // add less (logarithmic scale). This prevents 50 missing alt tags
+          // from maxing the score when 3 is already very bad.
+          const points = pointsPer * (1 + Math.log2(nodeCount));
           totalPoints += points;
-          breakdown.lawsuitTriggers[ruleId] = points;
+          breakdown.lawsuitTriggers[ruleId] = Math.round(points);
         }
       } else {
         const pointsPer = GENERAL_IMPACT_POINTS[impact] || GENERAL_IMPACT_POINTS.minor;
-        const points = pointsPer * nodeCount;
+        const points = pointsPer * (1 + Math.log2(nodeCount));
         totalPoints += points;
-        breakdown.generalViolations[impact] += points;
+        breakdown.generalViolations[impact] += Math.round(points);
       }
     }
 
+    // Diversity bonus: more unique violation TYPES = higher real risk
+    // (a site with 5 different issue types is more likely to be sued
+    // than one with 50 instances of a single issue)
+    breakdown.uniqueRuleCount = uniqueRules.size;
+    if (uniqueRules.size >= 5) totalPoints *= 1.15;
+    else if (uniqueRules.size >= 3) totalPoints *= 1.05;
+
     // Cap at 100
-    const score = Math.min(totalPoints, 100);
+    const score = Math.min(Math.round(totalPoints), 100);
 
     // Determine risk level
     let level, color;

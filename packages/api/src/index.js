@@ -2,6 +2,7 @@ const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../../.env') });
 
 const express = require('express');
+const crypto = require('crypto');
 const cors = require('cors');
 const helmet = require('helmet');
 const { logger } = require('./utils/logger');
@@ -19,6 +20,13 @@ const { initScanQueue, initScanWorker } = require('./services/scan-queue');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+
+// ── Request ID Middleware ───────────────────────────────────────────
+// Assigns a unique request ID for log correlation across the request lifecycle.
+app.use((req, _res, next) => {
+  req.requestId = req.headers['x-request-id'] || crypto.randomUUID();
+  next();
+});
 
 // ── Global Middleware ───────────────────────────────────────────────
 // Stripe webhooks need raw body, so mount webhook route BEFORE json parser
