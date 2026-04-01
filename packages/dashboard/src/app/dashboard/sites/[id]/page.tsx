@@ -257,22 +257,22 @@ export default function SiteDetailPage() {
 
           <div className="flex items-center gap-2">
             {selectedScan?.public_token && (
-              <>
-                <button
-                  onClick={() => handleShare(selectedScan.public_token!)}
-                  className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors"
-                >
-                  <Share2 className="h-4 w-4" />
-                  {copied ? 'Copied!' : 'Share'}
-                </button>
-                <button
-                  onClick={handlePrint}
-                  className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors"
-                >
-                  <Download className="h-4 w-4" />
-                  PDF
-                </button>
-              </>
+              <button
+                onClick={() => handleShare(selectedScan.public_token!)}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors"
+              >
+                <Share2 className="h-4 w-4" />
+                {copied ? 'Copied!' : 'Share'}
+              </button>
+            )}
+            {selectedScan && (
+              <button
+                onClick={handlePrint}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors"
+              >
+                <Download className="h-4 w-4" />
+                PDF
+              </button>
             )}
             <button
               onClick={handleScan}
