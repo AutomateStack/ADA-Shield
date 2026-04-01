@@ -29,10 +29,10 @@ const authenticatedScanSchema = z.object({
 });
 
 // ── Free Scan Endpoint ──────────────────────────────────────────────
-// Rate limited: 10 per hour per IP
+// Rate limited: 3 per day per IP
 router.post(
   '/free',
-  createRateLimiter({ windowMs: 60 * 60 * 1000, max: 10 }),
+  createRateLimiter({ windowMs: 24 * 60 * 60 * 1000, max: 3 }),
   async (req, res, next) => {
     try {
       const parsed = freeScanSchema.safeParse(req.body);
@@ -74,9 +74,9 @@ router.post(
         logger.error('Failed to persist free scan result', { url: scanResult.url, error: err.message });
       }
 
-      // Free scan: return risk score + first 3 violations only
-      const limitedViolations = scanResult.violations.slice(0, 3);
-      const hiddenCount = Math.max(0, scanResult.violations.length - 3);
+      // Free scan: return risk score + first 2 violations only
+      const limitedViolations = scanResult.violations.slice(0, 2);
+      const hiddenCount = Math.max(0, scanResult.violations.length - 2);
 
       return res.json({
         url: scanResult.url,

@@ -1,5 +1,28 @@
 'use strict';
 
+// ── Colour contrast helpers ──────────────────────────────────────────────────
+
+function hexToRgb(hex) {
+  const clean = hex.replace(/^#/, '');
+  const full = clean.length === 3
+    ? clean.split('').map((c) => c + c).join('')
+    : clean;
+  const result = /^([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(full);
+  return result
+    ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) }
+    : null;
+}
+
+function getRelativeLuminance(hex) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return null;
+  const [r, g, b] = [rgb.r, rgb.g, rgb.b].map((c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
 /**
  * Generates a structured fix for an axe-core violation node.
  * Violations fall into three categories:
@@ -29,43 +52,85 @@ function generateFix(violationId, node, violation) {
         // Extract contrast data from axe-core failure summary if available
         const fgMatch = node.failureSummary?.match(/foreground color: (#[0-9a-fA-F]{3,8}|rgb[a]?\([^)]+\))/i);
         const bgMatch = node.failureSummary?.match(/background color: (#[0-9a-fA-F]{3,8}|rgb[a]?\([^)]+\))/i);
-        const ratioMatch = node.failureSummary?.match(/contrast ratio of ([\d.]+)/i);
+        // axe-core reports: "insufficient color contrast of X.X"
+        const actualRatioMatch = node.failureSummary?.match(/insufficient color contrast of ([\d.]+)/i);
+        // axe-core reports: "Expected contrast ratio of X.X:1"
+        const minRatioMatch = node.failureSummary?.match(/Expected contrast ratio of ([\d.]+)/i);
 
         const currentFg = fgMatch ? fgMatch[1] : 'unknown';
         const currentBg = bgMatch ? bgMatch[1] : 'unknown';
-        const ratio = ratioMatch ? ratioMatch[1] : 'below minimum';
+        const actualRatio = actualRatioMatch ? parseFloat(actualRatioMatch[1]) : null;
+        const minRatio = minRatioMatch ? parseFloat(minRatioMatch[1]) : 4.5;
 
-        // Pre-computed accessible dark text options on common backgrounds
-        const safeTextColors = {
-          dark: '#1a1a1a',    // works on any light bg (19:1 on white)
-          medium: '#2d2d2d',  // works on light grays (15:1 on #f5f5f5)
-          onDark: '#e8e8e8',  // works on dark bg (13:1 on #1a1a1a)
-        };
+        const ratioDisplay = actualRatio !== null ? `${actualRatio}:1` : 'below minimum';
+        const minDisplay = `${minRatio}:1`;
+
+        // Exact-minimum note: WCAG AA requires STRICTLY MORE THAN 4.5:1 for normal text
+        const exactFailNote =
+          actualRatio !== null && Math.abs(actualRatio - minRatio) < 0.05
+            ? `\n  ⚠ NOTE: A ratio of exactly ${actualRatio}:1 does NOT pass WCAG AA.\n  The minimum means your ratio must be strictly above ${minRatio}:1 (e.g. ${(minRatio + 0.1).toFixed(1)}:1 or higher).`
+            : '';
+
+        // Determine background brightness to give context-correct options
+        const bgLuminance = currentBg.startsWith('#') ? getRelativeLuminance(currentBg) : null;
+        const isDarkBg = bgLuminance !== null ? bgLuminance < 0.18 : null;
+
+        let optionsBlock;
+        if (isDarkBg === true) {
+          optionsBlock = `  RECOMMENDED FIX for DARK background (${currentBg}):
+  Your background is dark — your text must be LIGHTER, not darker.
+
+  Option A: Use white text (highest contrast, always passes)
+    color: #ffffff; /* 21:1 contrast on pure black */
+
+  Option B: Use off-white text
+    color: #f5f5f5; /* very high contrast on dark backgrounds */
+
+  Option C: Lighten the background colour
+    /* Use a lighter shade of ${currentBg} in your CSS */`;
+        } else if (isDarkBg === false) {
+          optionsBlock = `  RECOMMENDED FIX for LIGHT background (${currentBg}):
+  Your background is light — your text must be DARKER.
+
+  Option A: Use near-black text (safest choice)
+    color: #1a1a1a; /* 19:1 contrast on white */
+
+  Option B: Use dark grey text
+    color: #333333; /* 12.6:1 contrast on white */
+
+  Option C: Darken the background colour
+    /* Use a darker shade of ${currentBg} in your CSS */`;
+        } else {
+          optionsBlock = `  RECOMMENDED FIX — choose one:
+
+  Option A: Darken the text (use this if background is light)
+    color: #1a1a1a; /* 19:1 contrast on white */
+
+  Option B: Lighten the text (use this if background is dark)
+    color: #f5f5f5; /* high contrast on dark backgrounds */
+
+  Option C: Change the background colour to pass contrast
+    /* Adjust background-color in your CSS file */`;
+        }
 
         return `/* 
   CURRENT ISSUE:
   Selector: ${node.target?.[0] || 'see element above'}
   Foreground: ${currentFg}
   Background: ${currentBg}
-  Current contrast ratio: ${ratio} (minimum required: 4.5:1)
-  
-  RECOMMENDED FIX — choose one:
-  
-  Option A: Darken the text (if background is light)
-    color: ${safeTextColors.dark};  /* 19:1 contrast on white */
-  
-  Option B: Lighten the text (if background is dark)
-    color: ${safeTextColors.onDark};  /* 13:1 contrast on #1a1a1a */
-  
-  Option C: Increase background lightness
-    background-color: #ffffff;
-  
+  Current contrast ratio: ${ratioDisplay}
+  Minimum required: strictly above ${minDisplay}
+  Status: FAILS${exactFailNote}
+
+${optionsBlock}
+
   VERIFY YOUR FIX:
   https://webaim.org/resources/contrastchecker/
-  
-  MINIMUMS:
-  - Normal text (under 18pt): ratio must be 4.5:1 or higher
-  - Large text (18pt+ or 14pt bold): ratio must be 3:1 or higher
+  Enter Foreground: ${currentFg}  Background: ${currentBg}
+
+  MINIMUMS (WCAG 2.1 AA):
+  - Normal text (under 18pt / 14pt bold): must exceed 4.5:1
+  - Large text (18pt+ or 14pt bold): must exceed 3:1
 */`;
       })(),
       actionRequired: 'Update CSS colour values — not HTML',
@@ -244,6 +309,45 @@ ${node.html.replace(/<input/, '<input aria-label="Describe this field"')}`,
   To:     <main>{children}</main>
 */`,
       actionRequired: 'Wrap your primary content in a <main> HTML element',
+    },
+
+    // ============================================
+    // CONTENTINFO (FOOTER) NOT AT TOP LEVEL
+    // ============================================
+    'landmark-contentinfo-is-top-level': {
+      fixType: 'STRUCTURE',
+      showCodeDiff: false,
+      explanation:
+        'Your <footer> element is nested inside another landmark (e.g. <main> or <section>). ' +
+        'The contentinfo landmark must be a direct child of <body>.',
+      suggestedFix: `/* 
+  HOW TO FIX:
+
+  Your <footer> is currently nested inside <main> or another
+  landmark — this breaks screen reader navigation.
+
+  WRONG structure (your current code):
+  <body>
+    <main>
+      <section>...</section>
+      <footer>...</footer>  ← footer inside main = WRONG
+    </main>
+  </body>
+
+  CORRECT structure:
+  <body>
+    <header>...</header>
+    <main>
+      <section>...</section>
+    </main>
+    <footer>...</footer>  ← footer directly in body = CORRECT
+  </body>
+
+  In Next.js — check your layout.tsx:
+  Make sure <footer> is OUTSIDE and AFTER </main>.
+  Never place <footer> inside <main> or <section>.
+*/`,
+      actionRequired: 'Move <footer> outside of <main> — place it directly inside <body>',
     },
 
     // ============================================

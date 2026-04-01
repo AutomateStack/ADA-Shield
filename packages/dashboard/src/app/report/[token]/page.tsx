@@ -17,7 +17,7 @@ import { RiskGauge } from '@/components/scan/risk-gauge';
 import { ViolationCard } from '@/components/scan/violation-card';
 import { ShieldLogo } from '@/components/ui/shield-logo';
 
-const MAX_FREE_VIOLATIONS = 3;
+const MAX_FREE_VIOLATIONS = 2;
 
 function getRiskColor(score: number) {
   return score <= 29 ? 'green' : score <= 59 ? 'amber' : 'red';

@@ -91,9 +91,11 @@ export function ViolationCard({ violation, index }: ViolationCardProps) {
         </div>
       </button>
 
-      {/* Expanded content */}
-      {expanded && (
-        <div className="px-6 pb-6 border-t border-white/5">
+      {/* Expanded content — always in DOM so @media print can reveal it */}
+      <div
+        data-violation-body
+        className={`px-6 pb-6 border-t border-white/5${expanded ? '' : ' hidden'}`}
+      >
           <p className="text-slate-400 text-sm mt-4 mb-2">{violation.description}</p>
 
           {/* WCAG Tags */}
@@ -242,7 +244,6 @@ export function ViolationCard({ violation, index }: ViolationCardProps) {
             ))}
           </div>
         </div>
-      )}
     </div>
   );
 }
