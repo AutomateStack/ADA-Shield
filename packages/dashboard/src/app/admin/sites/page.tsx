@@ -58,6 +58,31 @@ interface EmailModal {
   message: string;
 }
 
+interface ContactHistoryEntry {
+  id: string;
+  recipient_email: string;
+  subject: string;
+  message: string;
+  template_style: EmailTemplateStyle | null;
+  delivery_channel: 'supabase-function' | 'api-fallback' | null;
+  delivery_status: 'sent' | 'failed' | null;
+  provider_message_id: string | null;
+  created_at: string;
+}
+
+interface ContactHistoryResponse {
+  site: {
+    id: string;
+    name: string | null;
+    url: string;
+    owner_email: string | null;
+  };
+  entries: ContactHistoryEntry[];
+  total: number;
+  page: number;
+  totalPages: number;
+}
+
 type EmailTemplateStyle = 'fear_urgency' | 'friendly_educational' | 'concise_direct';
 
 interface EmailTemplateResponse {
@@ -79,6 +104,11 @@ export default function AdminSitesPage() {
   const [emailModal, setEmailModal] = useState<EmailModal | null>(null);
   const [emailSending, setEmailSending] = useState(false);
   const [emailTemplateLoading, setEmailTemplateLoading] = useState(false);
+  const [sortBy, setSortBy] = useState<'created_at' | 'contacted_count' | 'last_contacted_at'>('created_at');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyData, setHistoryData] = useState<ContactHistoryResponse | null>(null);
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
   const adminSecret = process.env.NEXT_PUBLIC_ADMIN_SECRET || '';
@@ -87,9 +117,12 @@ export default function AdminSitesPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`${apiUrl}/api/admin/sites?page=${page}&limit=20`, {
+      const res = await fetch(
+        `${apiUrl}/api/admin/sites?page=${page}&limit=20&sortBy=${sortBy}&sortOrder=${sortOrder}`,
+        {
         headers: { 'x-admin-secret': adminSecret },
-      });
+        }
+      );
       if (!res.ok) throw new Error('Failed to fetch sites');
       const payload: SitesResponse = await res.json();
       setData(payload);
@@ -107,7 +140,7 @@ export default function AdminSitesPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiUrl, adminSecret, page]);
+  }, [apiUrl, adminSecret, page, sortBy, sortOrder]);
 
   useEffect(() => {
     fetchSites();
@@ -230,6 +263,7 @@ export default function AdminSitesPage() {
         body: JSON.stringify({
           subject: emailModal.subject,
           message: emailModal.message,
+          templateStyle: emailModal.selectedStyle,
         }),
       });
       if (!res.ok) {
@@ -243,6 +277,35 @@ export default function AdminSitesPage() {
       alert(err.message || 'Failed to send email');
     } finally {
       setEmailSending(false);
+    }
+  };
+
+  const toggleSort = (column: 'contacted_count' | 'last_contacted_at') => {
+    if (sortBy === column) {
+      setSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'));
+      return;
+    }
+    setSortBy(column);
+    setSortOrder('desc');
+  };
+
+  const openContactHistory = async (site: AdminSite) => {
+    setHistoryModalOpen(true);
+    setHistoryLoading(true);
+    setHistoryData(null);
+
+    try {
+      const res = await fetch(`${apiUrl}/api/admin/sites/${site.id}/contact-history?page=1&limit=20`, {
+        headers: { 'x-admin-secret': adminSecret },
+      });
+      if (!res.ok) throw new Error('Failed to load contact history');
+      const payload: ContactHistoryResponse = await res.json();
+      setHistoryData(payload);
+    } catch (err: any) {
+      alert(err.message || 'Failed to load contact history');
+      setHistoryModalOpen(false);
+    } finally {
+      setHistoryLoading(false);
     }
   };
 
@@ -293,8 +356,24 @@ export default function AdminSitesPage() {
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Status</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Owner</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Owner Email</th>
-                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Contacted</th>
-                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Last Contact</th>
+                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">
+                  <button
+                    onClick={() => toggleSort('contacted_count')}
+                    className="inline-flex items-center gap-1 hover:text-slate-200"
+                  >
+                    Contacted
+                    {sortBy === 'contacted_count' ? (sortOrder === 'desc' ? '↓' : '↑') : ''}
+                  </button>
+                </th>
+                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">
+                  <button
+                    onClick={() => toggleSort('last_contacted_at')}
+                    className="inline-flex items-center gap-1 hover:text-slate-200"
+                  >
+                    Last Contact
+                    {sortBy === 'last_contacted_at' ? (sortOrder === 'desc' ? '↓' : '↑') : ''}
+                  </button>
+                </th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider text-right">Action</th>
               </tr>
             </thead>
@@ -356,7 +435,12 @@ export default function AdminSitesPage() {
                         />
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <span className="text-sm text-slate-300 font-medium">{site.contacted_count}</span>
+                        <button
+                          onClick={() => openContactHistory(site)}
+                          className="text-sm text-brand-300 hover:text-brand-200 font-medium underline underline-offset-2"
+                        >
+                          {site.contacted_count}
+                        </button>
                       </td>
                       <td className="px-4 py-3 min-w-[140px]">
                         <span className="text-xs text-slate-400">
@@ -503,6 +587,53 @@ export default function AdminSitesPage() {
                 )}
                 Send Email
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {historyModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border border-white/10 rounded-xl max-w-3xl w-full shadow-xl max-h-[80vh] overflow-hidden">
+            <div className="flex items-center justify-between p-6 border-b border-white/10">
+              <div>
+                <h2 className="text-lg font-bold text-white">Contact History</h2>
+                {historyData?.site && (
+                  <p className="text-sm text-slate-400 mt-1">
+                    {historyData.site.name || historyData.site.url}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => setHistoryModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto max-h-[60vh]">
+              {historyLoading ? (
+                <div className="text-center text-slate-400 py-8">Loading contact history...</div>
+              ) : !historyData || historyData.entries.length === 0 ? (
+                <div className="text-center text-slate-400 py-8">No contact history yet</div>
+              ) : (
+                <div className="space-y-4">
+                  {historyData.entries.map((entry) => (
+                    <div key={entry.id} className="border border-white/10 rounded-lg p-4 bg-white/[0.02]">
+                      <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400 mb-2">
+                        <span>{new Date(entry.created_at).toLocaleString()}</span>
+                        <span>Style: {entry.template_style || 'n/a'}</span>
+                        <span>Channel: {entry.delivery_channel || 'n/a'}</span>
+                        <span>Status: {entry.delivery_status || 'n/a'}</span>
+                      </div>
+                      <div className="text-sm text-slate-200 font-medium mb-1">{entry.subject}</div>
+                      <div className="text-xs text-slate-400 mb-2">To: {entry.recipient_email}</div>
+                      <div className="text-sm text-slate-300 whitespace-pre-wrap line-clamp-6">{entry.message}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

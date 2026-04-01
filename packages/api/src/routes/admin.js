@@ -14,6 +14,8 @@ const {
   getSiteById,
   getLatestSiteScanSummary,
   markSiteAsContacted,
+  createSiteContactHistoryEntry,
+  getSiteContactHistory,
 } = require('../db/admin');
 const { invokeSupabaseFunction } = require('../services/supabase-functions');
 const { sendEmail } = require('../services/email');
@@ -109,8 +111,10 @@ router.get('/sites', async (req, res, next) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const sortBy = String(req.query.sortBy || 'created_at');
+    const sortOrder = String(req.query.sortOrder || 'desc');
 
-    const result = await getAdminSites({ page, limit });
+    const result = await getAdminSites({ page, limit, sortBy, sortOrder });
     return res.json(result);
   } catch (error) {
     next(error);
@@ -152,6 +156,7 @@ router.patch('/sites/:siteId', async (req, res, next) => {
 const sendEmailSchema = z.object({
   subject: z.string().trim().min(1).max(200),
   message: z.string().trim().min(1).max(5000),
+  templateStyle: z.enum(['fear_urgency', 'friendly_educational', 'concise_direct']).optional(),
 });
 
 function extractFirstName(ownerName) {
@@ -188,10 +193,11 @@ function pickDefaultTemplateStyle(riskScore) {
 
 function buildEmailTemplates({ firstName, restaurantName, city, issueText }) {
   const dashboardUrl = 'https://ada-shield-dashboard.vercel.app';
+  const supportLine = 'If you have any questions, you can reach me at tthirmal@gmail.com.';
 
   const templates = {
     fear_urgency: {
-      subject: `Is ${restaurantName} protected from ADA lawsuits?`,
+      subject: `[noreplay] Is ${restaurantName} protected from ADA lawsuits?`,
       message: `Hi ${firstName},
 
 Quick question - has anyone ever mentioned ADA website compliance to you?
@@ -206,12 +212,14 @@ Free scan here: ${dashboardUrl}
 
 Worth checking before a lawyer does it for you.
 
+${supportLine}
+
 Thirmal
 ADA Shield
 ${dashboardUrl}`,
     },
     friendly_educational: {
-      subject: `Quick ADA check for ${restaurantName}`,
+  subject: `[noreplay] Quick ADA check for ${restaurantName}`,
       message: `Hi ${firstName},
 
 I hope you are doing well. I ran a quick accessibility check for ${restaurantName} and found ${issueText} items worth fixing.
@@ -224,12 +232,14 @@ Run your free scan here: ${dashboardUrl}
 
 If you want, I can also share the top 2 priority fixes first.
 
+${supportLine}
+
 Thirmal
 ADA Shield
 ${dashboardUrl}`,
     },
     concise_direct: {
-      subject: `${restaurantName}: ADA risk snapshot`,
+  subject: `[noreplay] ${restaurantName}: ADA risk snapshot`,
       message: `Hi ${firstName},
 
 I scanned ${restaurantName} and found ${issueText} ADA-related web issues.
@@ -243,6 +253,8 @@ ADA Shield gives you:
 - Exact fix suggestions for each issue
 
 Free scan: ${dashboardUrl}
+
+${supportLine}
 
 Thirmal
 ADA Shield`,
@@ -322,10 +334,13 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
       return res.status(400).json({ error: 'Site has no owner email address' });
     }
 
+    let deliveryChannel = 'supabase-function';
+    let providerMessageId = null;
+
     // Primary path: Supabase Edge Function (Resend)
     // Fallback path: direct API-side sendEmail if function call fails.
     try {
-      await invokeSupabaseFunction('send-admin-email', {
+      const response = await invokeSupabaseFunction('send-admin-email', {
         to: site.owner_email,
         subject: parsed.data.subject,
         message: parsed.data.message,
@@ -333,6 +348,7 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
         siteName: site.name,
         siteUrl: site.url,
       });
+      providerMessageId = response?.messageId || null;
     } catch (edgeError) {
       logger.warn('Edge function send failed, using local email fallback', {
         siteId: site.id,
@@ -340,12 +356,25 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
         error: edgeError.message,
       });
 
-      await sendEmail({
+      deliveryChannel = 'api-fallback';
+      const fallbackResponse = await sendEmail({
         to: site.owner_email,
         subject: parsed.data.subject,
         text: parsed.data.message,
       });
+      providerMessageId = fallbackResponse?.id || null;
     }
+
+    await createSiteContactHistoryEntry({
+      siteId: site.id,
+      recipientEmail: site.owner_email,
+      subject: parsed.data.subject,
+      message: parsed.data.message,
+      templateStyle: parsed.data.templateStyle || null,
+      deliveryChannel,
+      deliveryStatus: 'sent',
+      providerMessageId,
+    });
 
     // Mark site as contacted
     await markSiteAsContacted(req.params.siteId);
@@ -353,6 +382,31 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
     return res.json({ 
       success: true, 
       message: 'Email sent and contact recorded' 
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/sites/:siteId/contact-history', async (req, res, next) => {
+  try {
+    const site = await getSiteById(req.params.siteId);
+    if (!site) {
+      return res.status(404).json({ error: 'Site not found' });
+    }
+
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const result = await getSiteContactHistory(req.params.siteId, { page, limit });
+
+    return res.json({
+      site: {
+        id: site.id,
+        name: site.name,
+        url: site.url,
+        owner_email: site.owner_email,
+      },
+      ...result,
     });
   } catch (error) {
     next(error);
