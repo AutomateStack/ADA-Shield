@@ -38,7 +38,40 @@ function getResendClient() {
   return new Resend(apiKey);
 }
 
-const EMAIL_FROM = process.env.EMAIL_FROM || 'ADA Shield <tthirmal@gmail.com>';
+const EMAIL_FROM = process.env.EMAIL_FROM || 'ADA Shield <onboarding@resend.dev>';
+const RESEND_FALLBACK_FROM = 'ADA Shield <onboarding@resend.dev>';
+
+/**
+ * Resend requires a verified sender domain (or onboarding@resend.dev for testing).
+ * If a public email domain is configured as sender, fallback to onboarding sender.
+ * @param {string} from
+ * @returns {string}
+ */
+function getVerifiedFromAddress(from) {
+  const candidate = String(from || '').trim();
+  const emailMatch = candidate.match(/<([^>]+)>/);
+  const email = (emailMatch ? emailMatch[1] : candidate).trim().toLowerCase();
+  const domain = email.includes('@') ? email.split('@')[1] : '';
+  const blockedDomains = new Set([
+    'gmail.com',
+    'yahoo.com',
+    'outlook.com',
+    'hotmail.com',
+    'icloud.com',
+    'aol.com',
+    'live.com',
+  ]);
+
+  if (!domain || blockedDomains.has(domain)) {
+    logger.warn('EMAIL_FROM uses an unverified/public domain; falling back to Resend onboarding sender', {
+      configuredFrom: candidate || null,
+      fallbackFrom: RESEND_FALLBACK_FROM,
+    });
+    return RESEND_FALLBACK_FROM;
+  }
+
+  return candidate;
+}
 
 /**
  * Sends a scan-complete email with the risk score summary.
@@ -57,7 +90,7 @@ async function sendScanCompleteEmail({ to, siteName, siteUrl, riskScore, riskLev
 
   try {
     const { data, error } = await resend.emails.send({
-      from: EMAIL_FROM,
+      from: getVerifiedFromAddress(EMAIL_FROM),
       to,
       subject: `${riskEmoji} Scan Complete: ${subjectSiteName} — Risk Score ${riskScore}/100`,
       html: `
@@ -134,7 +167,7 @@ async function sendRiskAlertEmail({ to, siteName, siteUrl, riskScore, criticalCo
 
   try {
     const { data, error } = await resend.emails.send({
-      from: EMAIL_FROM,
+      from: getVerifiedFromAddress(EMAIL_FROM),
       to,
       subject: `🚨 High Risk Alert: ${subjectSiteName} scored ${riskScore}/100`,
       html: `
@@ -221,7 +254,7 @@ async function sendWeeklySummaryEmail({ to, sites, dashboardUrl }) {
 
   try {
     const { data, error } = await resend.emails.send({
-      from: EMAIL_FROM,
+      from: getVerifiedFromAddress(EMAIL_FROM),
       to,
       subject: `📊 Weekly ADA Report — ${highRiskCount > 0 ? `${highRiskCount} site(s) at high risk` : 'All looking good'}`,
       html: `
@@ -284,10 +317,11 @@ async function sendEmail({ to, subject, text, from = EMAIL_FROM }) {
 
   const sanitizedSubject = sanitizeSubject(subject);
   const safeText = escapeHtml(text);
+  const verifiedFrom = getVerifiedFromAddress(from);
 
   try {
     const { data, error } = await resend.emails.send({
-      from,
+      from: verifiedFrom,
       to,
       subject: sanitizedSubject,
       html: `
