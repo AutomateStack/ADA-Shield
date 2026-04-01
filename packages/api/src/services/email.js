@@ -38,7 +38,7 @@ function getResendClient() {
   return new Resend(apiKey);
 }
 
-const EMAIL_FROM = process.env.EMAIL_FROM || 'ADA Shield <alerts@adashield.com>';
+const EMAIL_FROM = process.env.EMAIL_FROM || 'ADA Shield <tthirmal@gmail.com>';
 
 /**
  * Sends a scan-complete email with the risk score summary.
