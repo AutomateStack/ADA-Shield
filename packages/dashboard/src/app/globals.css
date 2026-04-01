@@ -105,6 +105,11 @@
     break-inside: avoid;
   }
 
+  /* Always expand all violation details in PDF output */
+  [data-violation-body] {
+    display: block !important;
+  }
+
   a[href]::after {
     content: none;
   }
