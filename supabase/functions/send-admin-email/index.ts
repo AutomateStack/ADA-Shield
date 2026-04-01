@@ -1,0 +1,143 @@
+import { Resend } from 'npm:resend@4.0.0';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-internal-api-secret',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+};
+
+type SendAdminEmailPayload = {
+  to?: string;
+  subject?: string;
+  message?: string;
+  siteId?: string;
+  siteName?: string | null;
+  siteUrl?: string | null;
+};
+
+function jsonResponse(status: number, body: Record<string, unknown>) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      ...corsHeaders,
+      'Content-Type': 'application/json',
+    },
+  });
+}
+
+function sanitizeSubject(value: unknown): string {
+  return String(value ?? '').replace(/[\r\n\t]/g, '').slice(0, 200);
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
+}
+
+function getVerifiedFromAddress(configured: string): string {
+  const candidate = String(configured || '').trim();
+  const emailMatch = candidate.match(/<([^>]+)>/);
+  const email = (emailMatch ? emailMatch[1] : candidate).trim().toLowerCase();
+  const domain = email.includes('@') ? email.split('@')[1] : '';
+
+  const blockedDomains = new Set([
+    'gmail.com',
+    'yahoo.com',
+    'outlook.com',
+    'hotmail.com',
+    'icloud.com',
+    'aol.com',
+    'live.com',
+  ]);
+
+  if (!domain || blockedDomains.has(domain)) {
+    return 'ADA Shield <onboarding@resend.dev>';
+  }
+
+  return candidate;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
+  if (req.method !== 'POST') {
+    return jsonResponse(405, { error: 'Method not allowed' });
+  }
+
+  const internalSecret = Deno.env.get('INTERNAL_API_SECRET') || '';
+  const headerSecret = req.headers.get('x-internal-api-secret') || '';
+  if (!internalSecret || headerSecret !== internalSecret) {
+    return jsonResponse(401, { error: 'Unauthorized' });
+  }
+
+  const resendApiKey = Deno.env.get('RESEND_API_KEY') || '';
+  if (!resendApiKey || resendApiKey === 're_xxx') {
+    return jsonResponse(500, { error: 'RESEND_API_KEY is not configured' });
+  }
+
+  const configuredFrom = Deno.env.get('EMAIL_FROM') || 'ADA Shield <onboarding@resend.dev>';
+  const from = getVerifiedFromAddress(configuredFrom);
+
+  let payload: SendAdminEmailPayload;
+  try {
+    payload = await req.json();
+  } catch {
+    return jsonResponse(400, { error: 'Invalid JSON body' });
+  }
+
+  const to = String(payload.to || '').trim();
+  const subject = sanitizeSubject(payload.subject);
+  const message = String(payload.message || '').trim();
+  const siteName = escapeHtml(payload.siteName || 'your website');
+  const siteUrl = escapeHtml(payload.siteUrl || '');
+
+  if (!to || !subject || !message) {
+    return jsonResponse(400, { error: 'to, subject, and message are required' });
+  }
+
+  const resend = new Resend(resendApiKey);
+
+  try {
+    const { data, error } = await resend.emails.send({
+      from,
+      to,
+      subject,
+      html: `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <div style="max-width:600px;margin:0 auto;padding:40px 20px;">
+    <div style="text-align:center;margin-bottom:32px;">
+      <h1 style="color:#818cf8;font-size:24px;margin:0;">ADA Shield</h1>
+    </div>
+    <div style="background:#1e293b;border-radius:12px;padding:32px;border:1px solid rgba(255,255,255,0.1);">
+      <h2 style="color:#fff;font-size:20px;margin:0 0 8px;">${subject}</h2>
+      <p style="color:#94a3b8;margin:0 0 16px;">Regarding: <strong style="color:#fff;">${siteName}</strong>${siteUrl ? ` (${siteUrl})` : ''}</p>
+      <div style="color:#cbd5e1;line-height:1.6;white-space:pre-wrap;word-wrap:break-word;">${escapeHtml(message)}</div>
+    </div>
+  </div>
+</body>
+</html>`,
+    });
+
+    if (error) {
+      return jsonResponse(500, { error: error.message || 'Failed to send email' });
+    }
+
+    return jsonResponse(200, {
+      success: true,
+      messageId: data?.id || null,
+      from,
+    });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Failed to send email';
+    return jsonResponse(500, { error: msg });
+  }
+});

@@ -14,7 +14,7 @@ const {
   getSiteById,
   markSiteAsContacted,
 } = require('../db/admin');
-const { sendEmail } = require('../services/email');
+const { invokeSupabaseFunction } = require('../services/supabase-functions');
 
 const router = Router();
 
@@ -171,11 +171,14 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
       return res.status(400).json({ error: 'Site has no owner email address' });
     }
 
-    // Send email via Resend
-    await sendEmail({
+    // Send email through Supabase Edge Function (Resend)
+    await invokeSupabaseFunction('send-admin-email', {
       to: site.owner_email,
       subject: parsed.data.subject,
-      text: parsed.data.message,
+      message: parsed.data.message,
+      siteId: site.id,
+      siteName: site.name,
+      siteUrl: site.url,
     });
 
     // Mark site as contacted
