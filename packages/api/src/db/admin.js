@@ -371,6 +371,28 @@ async function getSiteById(siteId) {
 }
 
 /**
+ * Get latest scan summary for a site.
+ * @param {string} siteId
+ */
+async function getLatestSiteScanSummary(siteId) {
+  try {
+    const { data, error } = await supabase
+      .from('scan_results')
+      .select('id, scanned_at, total_violations, critical_count, serious_count, risk_score')
+      .eq('site_id', siteId)
+      .order('scanned_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw error;
+    return data || null;
+  } catch (error) {
+    logger.error('Failed to get latest site scan summary', { siteId, error: error.message });
+    throw error;
+  }
+}
+
+/**
  * Marks a site as contacted and increments contact count.
  * @param {string} siteId
  */
@@ -412,5 +434,6 @@ module.exports = {
   getAdminSites,
   updateAdminSiteMetadata,
   getSiteById,
+  getLatestSiteScanSummary,
   markSiteAsContacted,
 };

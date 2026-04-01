@@ -12,6 +12,7 @@ const {
   getAdminSites,
   updateAdminSiteMetadata,
   getSiteById,
+  getLatestSiteScanSummary,
   markSiteAsContacted,
 } = require('../db/admin');
 const { invokeSupabaseFunction } = require('../services/supabase-functions');
@@ -151,6 +152,77 @@ router.patch('/sites/:siteId', async (req, res, next) => {
 const sendEmailSchema = z.object({
   subject: z.string().trim().min(1).max(200),
   message: z.string().trim().min(1).max(5000),
+});
+
+function extractFirstName(ownerName) {
+  if (!ownerName) return 'there';
+  const first = String(ownerName).trim().split(/\s+/)[0];
+  return first || 'there';
+}
+
+function inferCityFromUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./i, '');
+    const firstLabel = host.split('.')[0] || '';
+    if (!firstLabel || /^\d+$/.test(firstLabel) || firstLabel.length < 4) {
+      return 'your area';
+    }
+    const city = firstLabel.replace(/[-_]/g, ' ').trim();
+    return city || 'your area';
+  } catch (_) {
+    return 'your area';
+  }
+}
+
+router.get('/sites/:siteId/email-template', async (req, res, next) => {
+  try {
+    const site = await getSiteById(req.params.siteId);
+    if (!site) {
+      return res.status(404).json({ error: 'Site not found' });
+    }
+
+    const latestScan = await getLatestSiteScanSummary(req.params.siteId);
+    const firstName = extractFirstName(site.owner_name);
+    const restaurantName = site.name || site.url;
+    const city = inferCityFromUrl(site.url);
+    const issueCount = Number.isFinite(latestScan?.total_violations)
+      ? latestScan.total_violations
+      : 0;
+    const issueText = issueCount > 0 ? String(issueCount) : 'multiple';
+
+    const subject = `Is ${restaurantName} protected from ADA lawsuits?`;
+    const message = `Hi ${firstName},
+
+Quick question - has anyone ever mentioned ADA website compliance to you?
+
+I ask because I've been scanning restaurant websites in ${city} this week, and ${restaurantName} came up with ${issueText} violations that match what plaintiff lawyers specifically look for.
+
+The restaurant industry is one of the top 5 most targeted industries for ADA web lawsuits. The average settlement is $5,000-$25,000, and that is before legal fees.
+
+I built a tool that gives you a 0-100 lawsuit risk score and shows the exact code to fix every issue. It takes 30 seconds to check.
+
+Free scan here: https://ada-shield-dashboard.vercel.app
+
+Worth checking before a lawyer does it for you.
+
+Thirmal
+ADA Shield
+https://ada-shield-dashboard.vercel.app`;
+
+    return res.json({
+      subject,
+      message,
+      dynamic: {
+        firstName,
+        restaurantName,
+        city,
+        issueCount: issueCount > 0 ? issueCount : null,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post('/sites/:siteId/send-email', async (req, res, next) => {
