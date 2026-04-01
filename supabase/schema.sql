@@ -57,6 +57,22 @@ CREATE TABLE IF NOT EXISTS scan_results (
 );
 
 -- ═══════════════════════════════════════════════════════════════════
+-- Site contact history table (admin outreach logs)
+-- ═══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS site_contact_history (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  site_id UUID REFERENCES sites(id) ON DELETE CASCADE NOT NULL,
+  recipient_email TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  message TEXT NOT NULL,
+  template_style TEXT,
+  delivery_channel TEXT CHECK (delivery_channel IN ('supabase-function', 'api-fallback')),
+  delivery_status TEXT CHECK (delivery_status IN ('sent', 'failed')) DEFAULT 'sent',
+  provider_message_id TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ═══════════════════════════════════════════════════════════════════
 -- Subscriptions table
 -- ═══════════════════════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS subscriptions (
@@ -91,6 +107,7 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sites ENABLE ROW LEVEL SECURITY;
 ALTER TABLE scan_results ENABLE ROW LEVEL SECURITY;
+ALTER TABLE site_contact_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notification_preferences ENABLE ROW LEVEL SECURITY;
 
@@ -113,6 +130,16 @@ CREATE POLICY "Users see own scans" ON scan_results
     )
   );
 
+-- Site contact history: users can see outreach entries for their own sites
+CREATE POLICY "Users see own site contact history" ON site_contact_history
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM sites
+      WHERE sites.id = site_contact_history.site_id
+        AND sites.user_id = auth.uid()
+    )
+  );
+
 -- Subscriptions: users can only see their own subscription (read-only; writes are via Stripe webhook/service role)
 CREATE POLICY "Users see own subscription" ON subscriptions
   FOR SELECT USING (auth.uid() = user_id);
@@ -129,6 +156,8 @@ CREATE INDEX IF NOT EXISTS idx_sites_user_id ON sites(user_id);
 CREATE INDEX IF NOT EXISTS idx_scan_results_site_id ON scan_results(site_id);
 CREATE INDEX IF NOT EXISTS idx_scan_results_user_id ON scan_results(user_id);
 CREATE INDEX IF NOT EXISTS idx_scan_results_scanned_at ON scan_results(scanned_at DESC);
+CREATE INDEX IF NOT EXISTS idx_site_contact_history_site_id ON site_contact_history(site_id);
+CREATE INDEX IF NOT EXISTS idx_site_contact_history_created_at ON site_contact_history(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sites_monitoring ON sites(monitoring_active) WHERE monitoring_active = true;
 CREATE INDEX IF NOT EXISTS idx_sites_owner_email ON sites(owner_email);

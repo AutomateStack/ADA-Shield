@@ -279,14 +279,19 @@ async function getAdminScanDetail(scanId) {
  * @param {number} [params.page=1]
  * @param {number} [params.limit=20]
  */
-async function getAdminSites({ page = 1, limit = 20 } = {}) {
+async function getAdminSites({ page = 1, limit = 20, sortBy = 'created_at', sortOrder = 'desc' } = {}) {
   try {
+    const allowedSortBy = new Set(['created_at', 'contacted_count', 'last_contacted_at']);
+    const normalizedSortBy = allowedSortBy.has(sortBy) ? sortBy : 'created_at';
+    const normalizedSortOrder = sortOrder === 'asc' ? 'asc' : 'desc';
+
     const { data, error, count } = await supabase
       .from('sites')
       .select(
         'id, user_id, url, name, created_at, owner_name, owner_email, contacted_count, last_contacted_at',
         { count: 'exact' }
       )
+      .order(normalizedSortBy, { ascending: normalizedSortOrder === 'asc', nullsFirst: normalizedSortOrder !== 'asc' })
       .order('created_at', { ascending: false })
       .range((page - 1) * limit, page * limit - 1);
 
@@ -424,6 +429,75 @@ async function markSiteAsContacted(siteId) {
   }
 }
 
+/**
+ * Inserts a contact history row for site outreach email.
+ * @param {object} params
+ */
+async function createSiteContactHistoryEntry({
+  siteId,
+  recipientEmail,
+  subject,
+  message,
+  templateStyle,
+  deliveryChannel,
+  deliveryStatus = 'sent',
+  providerMessageId = null,
+}) {
+  try {
+    const { data, error } = await supabase
+      .from('site_contact_history')
+      .insert({
+        site_id: siteId,
+        recipient_email: recipientEmail,
+        subject,
+        message,
+        template_style: templateStyle || null,
+        delivery_channel: deliveryChannel || null,
+        delivery_status: deliveryStatus,
+        provider_message_id: providerMessageId,
+      })
+      .select('*')
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    logger.error('Failed to create site contact history entry', {
+      siteId,
+      recipientEmail,
+      error: error.message,
+    });
+    throw error;
+  }
+}
+
+/**
+ * Returns contact history rows for a site.
+ * @param {string} siteId
+ * @param {object} params
+ */
+async function getSiteContactHistory(siteId, { page = 1, limit = 20 } = {}) {
+  try {
+    const { data, error, count } = await supabase
+      .from('site_contact_history')
+      .select('*', { count: 'exact' })
+      .eq('site_id', siteId)
+      .order('created_at', { ascending: false })
+      .range((page - 1) * limit, page * limit - 1);
+
+    if (error) throw error;
+    return {
+      entries: data || [],
+      total: count || 0,
+      page,
+      totalPages: Math.ceil((count || 0) / limit),
+    };
+  } catch (error) {
+    logger.error('Failed to get site contact history', { siteId, error: error.message });
+    throw error;
+  }
+}
+
 module.exports = {
   getAdminStats,
   getAdminScans,
@@ -436,4 +510,6 @@ module.exports = {
   getSiteById,
   getLatestSiteScanSummary,
   markSiteAsContacted,
+  createSiteContactHistoryEntry,
+  getSiteContactHistory,
 };
