@@ -175,6 +175,83 @@ function inferCityFromUrl(url) {
   }
 }
 
+function normalizeStyle(style) {
+  const allowed = new Set(['fear_urgency', 'friendly_educational', 'concise_direct']);
+  return allowed.has(style) ? style : null;
+}
+
+function pickDefaultTemplateStyle(riskScore) {
+  if (Number.isFinite(riskScore) && riskScore >= 70) return 'fear_urgency';
+  if (Number.isFinite(riskScore) && riskScore >= 40) return 'concise_direct';
+  return 'friendly_educational';
+}
+
+function buildEmailTemplates({ firstName, restaurantName, city, issueText }) {
+  const dashboardUrl = 'https://ada-shield-dashboard.vercel.app';
+
+  const templates = {
+    fear_urgency: {
+      subject: `Is ${restaurantName} protected from ADA lawsuits?`,
+      message: `Hi ${firstName},
+
+Quick question - has anyone ever mentioned ADA website compliance to you?
+
+I ask because I've been scanning restaurant websites in ${city} this week, and ${restaurantName} came up with ${issueText} violations that match what plaintiff lawyers specifically look for.
+
+The restaurant industry is one of the top 5 most targeted industries for ADA web lawsuits. The average settlement is $5,000-$25,000, and that is before legal fees.
+
+I built a tool that gives you a 0-100 lawsuit risk score and shows the exact code to fix every issue. It takes 30 seconds to check.
+
+Free scan here: ${dashboardUrl}
+
+Worth checking before a lawyer does it for you.
+
+Thirmal
+ADA Shield
+${dashboardUrl}`,
+    },
+    friendly_educational: {
+      subject: `Quick ADA check for ${restaurantName}`,
+      message: `Hi ${firstName},
+
+I hope you are doing well. I ran a quick accessibility check for ${restaurantName} and found ${issueText} items worth fixing.
+
+These are common issues restaurants usually miss, like contrast, missing labels, and image alt text. They can affect both user experience and ADA compliance risk.
+
+I built ADA Shield to make this easy: you get a 0-100 lawsuit risk score and exact code-level fixes in about 30 seconds.
+
+Run your free scan here: ${dashboardUrl}
+
+If you want, I can also share the top 2 priority fixes first.
+
+Thirmal
+ADA Shield
+${dashboardUrl}`,
+    },
+    concise_direct: {
+      subject: `${restaurantName}: ADA risk snapshot`,
+      message: `Hi ${firstName},
+
+I scanned ${restaurantName} and found ${issueText} ADA-related web issues.
+
+Why this matters:
+- Restaurants are a frequent ADA lawsuit target
+- Typical settlements can be costly before legal fees
+
+ADA Shield gives you:
+- 0-100 lawsuit risk score
+- Exact fix suggestions for each issue
+
+Free scan: ${dashboardUrl}
+
+Thirmal
+ADA Shield`,
+    },
+  };
+
+  return templates;
+}
+
 router.get('/sites/:siteId/email-template', async (req, res, next) => {
   try {
     const site = await getSiteById(req.params.siteId);
@@ -190,34 +267,35 @@ router.get('/sites/:siteId/email-template', async (req, res, next) => {
       ? latestScan.total_violations
       : 0;
     const issueText = issueCount > 0 ? String(issueCount) : 'multiple';
+    const templates = buildEmailTemplates({
+      firstName,
+      restaurantName,
+      city,
+      issueText,
+    });
 
-    const subject = `Is ${restaurantName} protected from ADA lawsuits?`;
-    const message = `Hi ${firstName},
-
-Quick question - has anyone ever mentioned ADA website compliance to you?
-
-I ask because I've been scanning restaurant websites in ${city} this week, and ${restaurantName} came up with ${issueText} violations that match what plaintiff lawyers specifically look for.
-
-The restaurant industry is one of the top 5 most targeted industries for ADA web lawsuits. The average settlement is $5,000-$25,000, and that is before legal fees.
-
-I built a tool that gives you a 0-100 lawsuit risk score and shows the exact code to fix every issue. It takes 30 seconds to check.
-
-Free scan here: https://ada-shield-dashboard.vercel.app
-
-Worth checking before a lawyer does it for you.
-
-Thirmal
-ADA Shield
-https://ada-shield-dashboard.vercel.app`;
+    const defaultStyle = pickDefaultTemplateStyle(latestScan?.risk_score);
+    const requestedStyle = normalizeStyle(String(req.query.style || '').trim());
+    const selectedStyle = requestedStyle || defaultStyle;
+    const selectedTemplate = templates[selectedStyle];
 
     return res.json({
-      subject,
-      message,
+      style: selectedStyle,
+      defaultStyle,
+      styles: [
+        { key: 'fear_urgency', label: 'Fear + Urgency' },
+        { key: 'friendly_educational', label: 'Friendly + Educational' },
+        { key: 'concise_direct', label: 'Concise + Direct' },
+      ],
+      templates,
+      subject: selectedTemplate.subject,
+      message: selectedTemplate.message,
       dynamic: {
         firstName,
         restaurantName,
         city,
         issueCount: issueCount > 0 ? issueCount : null,
+        riskScore: latestScan?.risk_score ?? null,
       },
     });
   } catch (error) {

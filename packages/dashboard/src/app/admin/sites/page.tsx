@@ -50,11 +50,21 @@ interface EmailModal {
   siteId: string;
   siteName: string;
   ownerEmail: string;
+  selectedStyle: EmailTemplateStyle;
+  defaultStyle: EmailTemplateStyle;
+  styleOptions: Array<{ key: EmailTemplateStyle; label: string }>;
+  templates: Record<EmailTemplateStyle, { subject: string; message: string }>;
   subject: string;
   message: string;
 }
 
+type EmailTemplateStyle = 'fear_urgency' | 'friendly_educational' | 'concise_direct';
+
 interface EmailTemplateResponse {
+  style: EmailTemplateStyle;
+  defaultStyle: EmailTemplateStyle;
+  styles: Array<{ key: EmailTemplateStyle; label: string }>;
+  templates: Record<EmailTemplateStyle, { subject: string; message: string }>;
   subject: string;
   message: string;
 }
@@ -147,6 +157,18 @@ export default function AdminSitesPage() {
       siteId: site.id,
       siteName: site.name || 'Unnamed site',
       ownerEmail: site.owner_email || '',
+      selectedStyle: 'fear_urgency',
+      defaultStyle: 'fear_urgency',
+      styleOptions: [
+        { key: 'fear_urgency', label: 'Fear + Urgency' },
+        { key: 'friendly_educational', label: 'Friendly + Educational' },
+        { key: 'concise_direct', label: 'Concise + Direct' },
+      ],
+      templates: {
+        fear_urgency: { subject: 'Loading template...', message: '' },
+        friendly_educational: { subject: '', message: '' },
+        concise_direct: { subject: '', message: '' },
+      },
       subject: 'Loading template...',
       message: 'Preparing a personalized outreach message from recent scan data...',
     });
@@ -166,6 +188,10 @@ export default function AdminSitesPage() {
         if (!prev || prev.siteId !== site.id) return prev;
         return {
           ...prev,
+          selectedStyle: payload.style,
+          defaultStyle: payload.defaultStyle,
+          styleOptions: payload.styles,
+          templates: payload.templates,
           subject: payload.subject,
           message: payload.message,
         };
@@ -175,6 +201,8 @@ export default function AdminSitesPage() {
         if (!prev || prev.siteId !== site.id) return prev;
         return {
           ...prev,
+          selectedStyle: 'fear_urgency',
+          defaultStyle: 'fear_urgency',
           subject: `Is ${site.name || 'your restaurant'} protected from ADA lawsuits?`,
           message: `Hi there,\n\nQuick question - has anyone ever mentioned ADA website compliance to you?\n\nI ask because I scanned ${site.name || 'your website'} and found issues that match what plaintiff lawyers look for.\n\nFree scan here: https://ada-shield-dashboard.vercel.app\n\nThirmal\nADA Shield`,
         };
@@ -216,6 +244,21 @@ export default function AdminSitesPage() {
     } finally {
       setEmailSending(false);
     }
+  };
+
+  const onTemplateStyleChange = (style: EmailTemplateStyle) => {
+    setEmailModal((prev) => {
+      if (!prev) return prev;
+      const selected = prev.templates[style];
+      if (!selected) return prev;
+
+      return {
+        ...prev,
+        selectedStyle: style,
+        subject: selected.subject,
+        message: selected.message,
+      };
+    });
   };
 
   return (
@@ -394,6 +437,25 @@ export default function AdminSitesPage() {
             </div>
 
             <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Template Style</label>
+                <select
+                  value={emailModal.selectedStyle}
+                  onChange={(e) => onTemplateStyleChange(e.target.value as EmailTemplateStyle)}
+                  disabled={emailTemplateLoading}
+                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                >
+                  {emailModal.styleOptions.map((option) => (
+                    <option key={option.key} value={option.key}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 mt-1">
+                  Default style is auto-selected from the latest risk score.
+                </p>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">Subject</label>
                 <input
