@@ -15,6 +15,7 @@ const {
   markSiteAsContacted,
 } = require('../db/admin');
 const { invokeSupabaseFunction } = require('../services/supabase-functions');
+const { sendEmail } = require('../services/email');
 
 const router = Router();
 
@@ -171,15 +172,30 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
       return res.status(400).json({ error: 'Site has no owner email address' });
     }
 
-    // Send email through Supabase Edge Function (Resend)
-    await invokeSupabaseFunction('send-admin-email', {
-      to: site.owner_email,
-      subject: parsed.data.subject,
-      message: parsed.data.message,
-      siteId: site.id,
-      siteName: site.name,
-      siteUrl: site.url,
-    });
+    // Primary path: Supabase Edge Function (Resend)
+    // Fallback path: direct API-side sendEmail if function call fails.
+    try {
+      await invokeSupabaseFunction('send-admin-email', {
+        to: site.owner_email,
+        subject: parsed.data.subject,
+        message: parsed.data.message,
+        siteId: site.id,
+        siteName: site.name,
+        siteUrl: site.url,
+      });
+    } catch (edgeError) {
+      logger.warn('Edge function send failed, using local email fallback', {
+        siteId: site.id,
+        to: site.owner_email,
+        error: edgeError.message,
+      });
+
+      await sendEmail({
+        to: site.owner_email,
+        subject: parsed.data.subject,
+        text: parsed.data.message,
+      });
+    }
 
     // Mark site as contacted
     await markSiteAsContacted(req.params.siteId);
