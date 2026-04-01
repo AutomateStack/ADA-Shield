@@ -7,8 +7,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
-  Filter,
 } from 'lucide-react';
+import Link from 'next/link';
 import { cn } from '@/lib/utils';
 
 interface Scan {
@@ -127,19 +127,20 @@ export default function AdminScansPage() {
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider hidden lg:table-cell">Breakdown</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider hidden md:table-cell">Duration</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Scanned</th>
+                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
+                  <td colSpan={8} className="px-4 py-12 text-center text-slate-500">
                     <RefreshCw className="h-5 w-5 animate-spin mx-auto mb-2" />
                     Loading scans...
                   </td>
                 </tr>
               ) : !data || data.scans.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
+                  <td colSpan={8} className="px-4 py-12 text-center text-slate-500">
                     No scans found
                   </td>
                 </tr>
@@ -193,6 +194,15 @@ export default function AdminScansPage() {
                     </td>
                     <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">
                       {formatTimeAgo(scan.scanned_at)}
+                    </td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <Link
+                        href={`/admin/scans/${scan.id}`}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-brand-300 hover:text-white bg-brand-600/10 hover:bg-brand-600/30 border border-brand-500/30 rounded-md transition-colors"
+                      >
+                        View
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </Link>
                     </td>
                   </tr>
                 ))
