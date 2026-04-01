@@ -1,5 +1,6 @@
 const { Router } = require('express');
 const crypto = require('crypto');
+const { z } = require('zod');
 const { logger } = require('../utils/logger');
 const {
   getAdminStats,
@@ -8,6 +9,8 @@ const {
   getAdminUsers,
   getAdminSubscriptions,
   getAdminScanDetail,
+  getAdminSites,
+  updateAdminSiteMetadata,
 } = require('../db/admin');
 
 const router = Router();
@@ -91,6 +94,53 @@ router.get('/users', async (req, res, next) => {
 
     const result = await getAdminUsers({ page, limit });
     return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Sites ───────────────────────────────────────────────────────────
+router.get('/sites', async (req, res, next) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+
+    const result = await getAdminSites({ page, limit });
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+const adminSitePatchSchema = z.object({
+  owner_name: z.string().trim().max(120).nullable().optional(),
+  owner_email: z.string().trim().email().max(254).nullable().optional(),
+  sales_contact_name: z.string().trim().max(120).nullable().optional(),
+  sales_contact_email: z.string().trim().email().max(254).nullable().optional(),
+});
+
+router.patch('/sites/:siteId', async (req, res, next) => {
+  try {
+    const parsed = adminSitePatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+
+    const patch = {};
+    for (const [key, value] of Object.entries(parsed.data)) {
+      if (value === undefined) continue;
+      patch[key] = typeof value === 'string' && value.trim() === '' ? null : value;
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ error: 'No valid fields provided' });
+    }
+
+    const updated = await updateAdminSiteMetadata(req.params.siteId, patch);
+    return res.json({ site: updated });
   } catch (error) {
     next(error);
   }

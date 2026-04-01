@@ -270,6 +270,84 @@ async function getAdminScanDetail(scanId) {
   }
 }
 
+// ── Sites Listings / Metadata ──────────────────────────────────────
+
+/**
+ * Returns sites with pagination plus owner email lookup.
+ * @param {object} params
+ * @param {number} [params.page=1]
+ * @param {number} [params.limit=20]
+ */
+async function getAdminSites({ page = 1, limit = 20 } = {}) {
+  try {
+    const { data, error, count } = await supabase
+      .from('sites')
+      .select(
+        'id, user_id, url, name, created_at, monitoring_active, last_scanned_at, pages_to_scan, owner_name, owner_email, sales_contact_name, sales_contact_email',
+        { count: 'exact' }
+      )
+      .order('created_at', { ascending: false })
+      .range((page - 1) * limit, page * limit - 1);
+
+    if (error) throw error;
+
+    const sites = data || [];
+    const userIds = [...new Set(sites.map((s) => s.user_id).filter(Boolean))];
+    let emailMap = {};
+
+    if (userIds.length > 0) {
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id, email')
+        .in('id', userIds);
+      if (profilesError) {
+        logger.warn('Could not fetch profiles for admin sites view', { error: profilesError.message });
+      } else {
+        for (const p of profiles || []) {
+          emailMap[p.id] = p.email;
+        }
+      }
+    }
+
+    return {
+      sites: sites.map((site) => ({
+        ...site,
+        user_email: site.user_id ? emailMap[site.user_id] || null : null,
+      })),
+      total: count || 0,
+      page,
+      totalPages: Math.ceil((count || 0) / limit),
+    };
+  } catch (error) {
+    logger.error('Failed to get admin sites', { error: error.message });
+    throw error;
+  }
+}
+
+/**
+ * Updates site-level owner/sales metadata from admin panel.
+ * @param {string} siteId
+ * @param {object} patch
+ */
+async function updateAdminSiteMetadata(siteId, patch) {
+  try {
+    const { data, error } = await supabase
+      .from('sites')
+      .update(patch)
+      .eq('id', siteId)
+      .select(
+        'id, user_id, url, name, created_at, monitoring_active, last_scanned_at, pages_to_scan, owner_name, owner_email, sales_contact_name, sales_contact_email'
+      )
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    logger.error('Failed to update admin site metadata', { siteId, error: error.message });
+    throw error;
+  }
+}
+
 module.exports = {
   getAdminStats,
   getAdminScans,
@@ -277,4 +355,6 @@ module.exports = {
   getAdminUsers,
   getAdminSubscriptions,
   getAdminScanDetail,
+  getAdminSites,
+  updateAdminSiteMetadata,
 };
