@@ -1,20 +1,37 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, ChevronLeft, ChevronRight, Save, Globe } from 'lucide-react';
+import { RefreshCw, ChevronLeft, ChevronRight, Save, Globe, Send, X } from 'lucide-react';
+
+// Simple relative time formatter
+const formatRelativeTime = (dateString: string | null): string => {
+  if (!dateString) return '—';
+  const date = new Date(dateString);
+  const now = new Date();
+  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return date.toLocaleDateString();
+};
 
 interface AdminSite {
   id: string;
   user_id: string | null;
   user_email: string | null;
-  site_type: 'authenticated' | 'free_scan';
+  is_registered: boolean;
   url: string;
   name: string | null;
   created_at: string;
   owner_name: string | null;
   owner_email: string | null;
-  sales_contact_name: string | null;
-  sales_contact_email: string | null;
+  contacted_count: number;
+  last_contacted_at: string | null;
 }
 
 interface SitesResponse {
@@ -27,8 +44,14 @@ interface SitesResponse {
 interface DraftRow {
   owner_name: string;
   owner_email: string;
-  sales_contact_name: string;
-  sales_contact_email: string;
+}
+
+interface EmailModal {
+  siteId: string;
+  siteName: string;
+  ownerEmail: string;
+  subject: string;
+  message: string;
 }
 
 export default function AdminSitesPage() {
@@ -38,6 +61,8 @@ export default function AdminSitesPage() {
   const [error, setError] = useState('');
   const [drafts, setDrafts] = useState<Record<string, DraftRow>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
+  const [emailModal, setEmailModal] = useState<EmailModal | null>(null);
+  const [emailSending, setEmailSending] = useState(false);
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
   const adminSecret = process.env.NEXT_PUBLIC_ADMIN_SECRET || '';
@@ -58,8 +83,6 @@ export default function AdminSitesPage() {
         nextDrafts[site.id] = {
           owner_name: site.owner_name || '',
           owner_email: site.owner_email || '',
-          sales_contact_name: site.sales_contact_name || '',
-          sales_contact_email: site.sales_contact_email || '',
         };
       }
       setDrafts(nextDrafts);
@@ -81,8 +104,6 @@ export default function AdminSitesPage() {
         ...(prev[siteId] || {
           owner_name: '',
           owner_email: '',
-          sales_contact_name: '',
-          sales_contact_email: '',
         }),
         [key]: value,
       },
@@ -115,13 +136,57 @@ export default function AdminSitesPage() {
     }
   };
 
+  const openEmailModal = (site: AdminSite) => {
+    setEmailModal({
+      siteId: site.id,
+      siteName: site.name || 'Unnamed site',
+      ownerEmail: site.owner_email || '',
+      subject: '',
+      message: '',
+    });
+  };
+
+  const sendEmail = async () => {
+    if (!emailModal) return;
+    if (!emailModal.subject.trim() || !emailModal.message.trim()) {
+      alert('Subject and message are required');
+      return;
+    }
+
+    setEmailSending(true);
+    try {
+      const res = await fetch(`${apiUrl}/api/admin/sites/${emailModal.siteId}/send-email`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-secret': adminSecret,
+        },
+        body: JSON.stringify({
+          subject: emailModal.subject,
+          message: emailModal.message,
+        }),
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload.error || 'Failed to send email');
+      }
+      alert('Email sent successfully');
+      setEmailModal(null);
+      await fetchSites();
+    } catch (err: any) {
+      alert(err.message || 'Failed to send email');
+    } finally {
+      setEmailSending(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Sites</h1>
           <p className="text-sm text-slate-400 mt-1">
-            Track site owner & sales contact (includes free scans & authenticated users)
+            Track site owner contact info (includes free scans & authenticated users)
           </p>
         </div>
         <button
@@ -144,26 +209,25 @@ export default function AdminSitesPage() {
             <thead>
               <tr className="border-b border-white/10 text-left">
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Site</th>
-                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Type</th>
-                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Account Email</th>
+                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Status</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Owner</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Owner Email</th>
-                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Sales Contact</th>
-                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Sales Email</th>
+                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Contacted</th>
+                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Last Contact</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-slate-500">
+                  <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
                     <RefreshCw className="h-5 w-5 animate-spin mx-auto mb-2" />
                     Loading sites...
                   </td>
                 </tr>
               ) : !data || data.sites.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-slate-500">
+                  <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
                     No sites found
                   </td>
                 </tr>
@@ -172,8 +236,6 @@ export default function AdminSitesPage() {
                   const draft = drafts[site.id] || {
                     owner_name: '',
                     owner_email: '',
-                    sales_contact_name: '',
-                    sales_contact_email: '',
                   };
 
                   return (
@@ -188,16 +250,13 @@ export default function AdminSitesPage() {
                       <td className="px-4 py-3 min-w-[110px]">
                         <span
                           className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                            site.site_type === 'free_scan'
-                              ? 'bg-slate-500/10 text-slate-300'
-                              : 'bg-brand-500/10 text-brand-300'
+                            site.is_registered
+                              ? 'bg-brand-500/10 text-brand-300'
+                              : 'bg-slate-500/10 text-slate-300'
                           }`}
                         >
-                          {site.site_type === 'free_scan' ? 'Free Scan' : 'User Account'}
+                          {site.is_registered ? 'Registered' : 'Free Scan'}
                         </span>
-                      </td>
-                      <td className="px-4 py-3 min-w-[200px] text-xs text-slate-400">
-                        {site.user_email || '—'}
                       </td>
                       <td className="px-4 py-3 min-w-[170px]">
                         <input
@@ -215,23 +274,24 @@ export default function AdminSitesPage() {
                           className="w-full px-2.5 py-1.5 rounded-md bg-white/5 border border-white/10 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500"
                         />
                       </td>
-                      <td className="px-4 py-3 min-w-[170px]">
-                        <input
-                          value={draft.sales_contact_name}
-                          onChange={(e) => updateDraft(site.id, 'sales_contact_name', e.target.value)}
-                          placeholder="Sales person name"
-                          className="w-full px-2.5 py-1.5 rounded-md bg-white/5 border border-white/10 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        />
+                      <td className="px-4 py-3 text-center">
+                        <span className="text-sm text-slate-300 font-medium">{site.contacted_count}</span>
                       </td>
-                      <td className="px-4 py-3 min-w-[220px]">
-                        <input
-                          value={draft.sales_contact_email}
-                          onChange={(e) => updateDraft(site.id, 'sales_contact_email', e.target.value)}
-                          placeholder="sales@company.com"
-                          className="w-full px-2.5 py-1.5 rounded-md bg-white/5 border border-white/10 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        />
+                      <td className="px-4 py-3 min-w-[140px]">
+                        <span className="text-xs text-slate-400">
+                          {formatRelativeTime(site.last_contacted_at)}
+                        </span>
                       </td>
-                      <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <td className="px-4 py-3 text-right whitespace-nowrap space-x-2">
+                        <button
+                          onClick={() => openEmailModal(site)}
+                          disabled={!site.owner_email}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white disabled:text-slate-600 disabled:cursor-not-allowed bg-slate-600/10 hover:bg-slate-600/30 border border-slate-500/30 rounded-md transition-colors disabled:opacity-50"
+                          title={!site.owner_email ? 'Owner email required' : ''}
+                        >
+                          <Send className="h-3.5 w-3.5" />
+                          Email
+                        </button>
                         <button
                           onClick={() => saveSite(site.id)}
                           disabled={!!saving[site.id]}
@@ -277,6 +337,74 @@ export default function AdminSitesPage() {
           </div>
         )}
       </div>
+
+      {/* Email Modal */}
+      {emailModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border border-white/10 rounded-xl max-w-2xl w-full shadow-xl">
+            <div className="flex items-center justify-between p-6 border-b border-white/10">
+              <div>
+                <h2 className="text-lg font-bold text-white">Send Email to {emailModal.siteName}</h2>
+                <p className="text-sm text-slate-400 mt-1">{emailModal.ownerEmail}</p>
+              </div>
+              <button
+                onClick={() => setEmailModal(null)}
+                className="p-1 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Subject</label>
+                <input
+                  value={emailModal.subject}
+                  onChange={(e) =>
+                    setEmailModal({ ...emailModal, subject: e.target.value })
+                  }
+                  placeholder="Email subject"
+                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Message</label>
+                <textarea
+                  value={emailModal.message}
+                  onChange={(e) =>
+                    setEmailModal({ ...emailModal, message: e.target.value })
+                  }
+                  placeholder="Your message..."
+                  rows={6}
+                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 p-6 border-t border-white/10">
+              <button
+                onClick={() => setEmailModal(null)}
+                className="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={sendEmail}
+                disabled={emailSending}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {emailSending ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                Send Email
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -284,7 +284,7 @@ async function getAdminSites({ page = 1, limit = 20 } = {}) {
     const { data, error, count } = await supabase
       .from('sites')
       .select(
-        'id, user_id, url, name, created_at, monitoring_active, last_scanned_at, pages_to_scan, owner_name, owner_email, sales_contact_name, sales_contact_email',
+        'id, user_id, url, name, created_at, owner_name, owner_email, contacted_count, last_contacted_at',
         { count: 'exact' }
       )
       .order('created_at', { ascending: false })
@@ -314,7 +314,7 @@ async function getAdminSites({ page = 1, limit = 20 } = {}) {
       sites: sites.map((site) => ({
         ...site,
         user_email: site.user_id ? emailMap[site.user_id] || null : null,
-        site_type: site.user_id ? 'authenticated' : 'free_scan',
+        is_registered: !!site.user_id,
       })),
       total: count || 0,
       page,
@@ -327,9 +327,9 @@ async function getAdminSites({ page = 1, limit = 20 } = {}) {
 }
 
 /**
- * Updates site-level owner/sales metadata from admin panel.
+ * Updates site-level owner metadata from admin panel.
  * @param {string} siteId
- * @param {object} patch
+ * @param {object} patch - Fields to update (owner_name, owner_email)
  */
 async function updateAdminSiteMetadata(siteId, patch) {
   try {
@@ -338,7 +338,7 @@ async function updateAdminSiteMetadata(siteId, patch) {
       .update(patch)
       .eq('id', siteId)
       .select(
-        'id, user_id, url, name, created_at, monitoring_active, last_scanned_at, pages_to_scan, owner_name, owner_email, sales_contact_name, sales_contact_email'
+        'id, user_id, url, name, created_at, owner_name, owner_email, contacted_count, last_contacted_at'
       )
       .single();
 
@@ -346,6 +346,50 @@ async function updateAdminSiteMetadata(siteId, patch) {
     return data;
   } catch (error) {
     logger.error('Failed to update admin site metadata', { siteId, error: error.message });
+    throw error;
+  }
+}
+
+/**
+ * Get a site by ID.
+ * @param {string} siteId
+ */
+async function getSiteById(siteId) {
+  try {
+    const { data, error } = await supabase
+      .from('sites')
+      .select('id, url, name, owner_name, owner_email, user_id, created_at, contacted_count, last_contacted_at')
+      .eq('id', siteId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw error;
+    return data || null;
+  } catch (error) {
+    logger.error('Failed to get site by ID', { siteId, error: error.message });
+    throw error;
+  }
+}
+
+/**
+ * Marks a site as contacted and increments contact count.
+ * @param {string} siteId
+ */
+async function markSiteAsContacted(siteId) {
+  try {
+    const { data, error } = await supabase
+      .from('sites')
+      .update({
+        contacted_count: supabase.raw('contacted_count + 1'),
+        last_contacted_at: new Date().toISOString(),
+      })
+      .eq('id', siteId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    logger.error('Failed to mark site as contacted', { siteId, error: error.message });
     throw error;
   }
 }
@@ -359,4 +403,6 @@ module.exports = {
   getAdminScanDetail,
   getAdminSites,
   updateAdminSiteMetadata,
+  getSiteById,
+  markSiteAsContacted,
 };

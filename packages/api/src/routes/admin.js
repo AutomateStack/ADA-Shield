@@ -11,7 +11,10 @@ const {
   getAdminScanDetail,
   getAdminSites,
   updateAdminSiteMetadata,
+  getSiteById,
+  markSiteAsContacted,
 } = require('../db/admin');
+const { sendEmail } = require('../services/email');
 
 const router = Router();
 
@@ -115,8 +118,6 @@ router.get('/sites', async (req, res, next) => {
 const adminSitePatchSchema = z.object({
   owner_name: z.string().trim().max(120).nullable().optional(),
   owner_email: z.string().trim().email().max(254).nullable().optional(),
-  sales_contact_name: z.string().trim().max(120).nullable().optional(),
-  sales_contact_email: z.string().trim().email().max(254).nullable().optional(),
 });
 
 router.patch('/sites/:siteId', async (req, res, next) => {
@@ -141,6 +142,50 @@ router.patch('/sites/:siteId', async (req, res, next) => {
 
     const updated = await updateAdminSiteMetadata(req.params.siteId, patch);
     return res.json({ site: updated });
+  } catch (error) {
+    next(error);
+  }
+});
+
+const sendEmailSchema = z.object({
+  subject: z.string().trim().min(1).max(200),
+  message: z.string().trim().min(1).max(5000),
+});
+
+router.post('/sites/:siteId/send-email', async (req, res, next) => {
+  try {
+    const parsed = sendEmailSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+
+    const site = await getSiteById(req.params.siteId);
+    if (!site) {
+      return res.status(404).json({ error: 'Site not found' });
+    }
+
+    if (!site.owner_email) {
+      return res.status(400).json({ error: 'Site has no owner email address' });
+    }
+
+    // Send email via Resend
+    await sendEmail({
+      to: site.owner_email,
+      subject: parsed.data.subject,
+      text: parsed.data.message,
+      from: 'contact@adashield.io',
+    });
+
+    // Mark site as contacted
+    await markSiteAsContacted(req.params.siteId);
+
+    return res.json({ 
+      success: true, 
+      message: 'Email sent and contact recorded' 
+    });
   } catch (error) {
     next(error);
   }

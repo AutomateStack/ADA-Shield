@@ -26,8 +26,8 @@ CREATE TABLE IF NOT EXISTS sites (
   name TEXT,
   owner_name TEXT,
   owner_email TEXT,
-  sales_contact_name TEXT,
-  sales_contact_email TEXT,
+  contacted_count INTEGER DEFAULT 0,
+  last_contacted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   monitoring_active BOOLEAN DEFAULT true,
   last_scanned_at TIMESTAMPTZ,
@@ -132,5 +132,5 @@ CREATE INDEX IF NOT EXISTS idx_scan_results_scanned_at ON scan_results(scanned_a
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sites_monitoring ON sites(monitoring_active) WHERE monitoring_active = true;
 CREATE INDEX IF NOT EXISTS idx_sites_owner_email ON sites(owner_email);
-CREATE INDEX IF NOT EXISTS idx_sites_sales_contact_email ON sites(sales_contact_email);
+CREATE INDEX IF NOT EXISTS idx_sites_last_contacted ON sites(last_contacted_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notification_prefs_user_id ON notification_preferences(user_id);
