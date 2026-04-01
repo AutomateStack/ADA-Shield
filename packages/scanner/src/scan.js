@@ -113,6 +113,58 @@ const DEFAULT_NAV_OPTIONS = {
 };
 
 /**
+ * Extracts site contact metadata from page HTML.
+ * Looks for common patterns: company name, contact email, sitemap, etc.
+ * @param {import('puppeteer').Page} page
+ * @returns {Promise<object>} Metadata with owner/sales contact hints
+ */
+async function extractPageMetadata(page) {
+  try {
+    const metadata = await page.evaluate(() => {
+      const result = {
+        title: document.title || null,
+        companyName: null,
+        contactEmail: null,
+        supportEmail: null,
+        footerText: null,
+      };
+
+      // Try to extract company name from various meta tags
+      const ogNameMeta = document.querySelector('meta[property="og:site_name"]');
+      if (ogNameMeta) result.companyName = ogNameMeta.getAttribute('content');
+
+      // Look for contact email in footer or contact page
+      const footer = document.querySelector('footer');
+      if (footer) {
+        const footerText = footer.innerText || '';
+        result.footerText = footerText.substring(0, 200);
+
+        // Extract emails from footer: look for common patterns
+        const emailMatch = footerText.match(/[\w.-]+@[\w.-]+\.\w+/g);
+        if (emailMatch) {
+          result.contactEmail = emailMatch[0];
+          // If multiple emails, second might be support
+          if (emailMatch.length > 1) result.supportEmail = emailMatch[1];
+        }
+      }
+
+      // Fallback: search entire page for company name in h1 or headers
+      const h1 = document.querySelector('h1');
+      if (h1 && !result.companyName) {
+        result.companyName = h1.innerText || null;
+      }
+
+      return result;
+    });
+
+    return metadata;
+  } catch (err) {
+    logger.warn('Failed to extract page metadata', { error: err.message });
+    return {};
+  }
+}
+
+/**
  * Scans a single page for WCAG 2.1 AA accessibility violations using axe-core.
  * @param {string} url - The URL to scan.
  * @param {object} [options] - Optional configuration.
@@ -178,6 +230,9 @@ async function scanPage(url, options = {}) {
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice'])
       .analyze();
 
+    // Extract site metadata (company name, contact info, etc.)
+    const pageMetadata = await extractPageMetadata(page);
+
     const scanDuration = Date.now() - startTime;
 
     // Count violations by impact level
@@ -208,6 +263,7 @@ async function scanPage(url, options = {}) {
       passedRules: results.passes.length,
       incompleteRules: results.incomplete.length,
       scanDurationMs: scanDuration,
+      pageMetadata,
     };
 
     logger.info('Scan complete', {
@@ -328,4 +384,4 @@ async function scanPageMultiViewport(url, options = {}) {
   };
 }
 
-module.exports = { scanPage, scanPageMultiViewport, formatViolation, closeBrowserPool };
+module.exports = { scanPage, scanPageMultiViewport, formatViolation, closeBrowserPool, extractPageMetadata };

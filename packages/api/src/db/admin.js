@@ -274,6 +274,7 @@ async function getAdminScanDetail(scanId) {
 
 /**
  * Returns sites with pagination plus owner email lookup.
+ * Includes both authenticated user sites and free-scan sites (user_id = null).
  * @param {object} params
  * @param {number} [params.page=1]
  * @param {number} [params.limit=20]
@@ -292,14 +293,14 @@ async function getAdminSites({ page = 1, limit = 20 } = {}) {
     if (error) throw error;
 
     const sites = data || [];
-    const userIds = [...new Set(sites.map((s) => s.user_id).filter(Boolean))];
+    const authenticatedUserIds = [...new Set(sites.map((s) => s.user_id).filter(Boolean))];
     let emailMap = {};
 
-    if (userIds.length > 0) {
+    if (authenticatedUserIds.length > 0) {
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
         .select('id, email')
-        .in('id', userIds);
+        .in('id', authenticatedUserIds);
       if (profilesError) {
         logger.warn('Could not fetch profiles for admin sites view', { error: profilesError.message });
       } else {
@@ -313,6 +314,7 @@ async function getAdminSites({ page = 1, limit = 20 } = {}) {
       sites: sites.map((site) => ({
         ...site,
         user_email: site.user_id ? emailMap[site.user_id] || null : null,
+        site_type: site.user_id ? 'authenticated' : 'free_scan',
       })),
       total: count || 0,
       page,

@@ -155,6 +155,70 @@ async function getMonitoredSites() {
 }
 
 /**
+ * Creates or finds a free scan site (user_id = null) and optionally updates owner/sales metadata.
+ * Used during free scans to track site metadata for admin outreach.
+ * @param {object} params
+ * @param {string} params.url - Site URL.
+ * @param {string} [params.ownerName] - Extracted owner/company name.
+ * @param {string} [params.ownerEmail] - Extracted contact email.
+ * @returns {Promise<object>} The site row.
+ */
+async function createOrUpdateFreeScanSite({ url, ownerName, ownerEmail }) {
+  try {
+    // Try to find existing free scan site by URL
+    const { data: existing } = await supabase
+      .from('sites')
+      .select('id')
+      .eq('url', url)
+      .is('user_id', null)
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      // Update existing free scan site with metadata if provided
+      if (ownerName || ownerEmail) {
+        const updateData = {};
+        if (ownerName) updateData.owner_name = ownerName;
+        if (ownerEmail) updateData.owner_email = ownerEmail;
+
+        const { data, error } = await supabase
+          .from('sites')
+          .update(updateData)
+          .eq('id', existing[0].id)
+          .select()
+          .single();
+
+        if (error) throw error;
+        return data;
+      }
+      return existing[0];
+    }
+
+    // Create new free scan site
+    const siteData = {
+      user_id: null,
+      url,
+      name: new URL(url).hostname,
+      owner_name: ownerName || null,
+      owner_email: ownerEmail || null,
+      pages_to_scan: 1,
+    };
+
+    const { data, error } = await supabase
+      .from('sites')
+      .insert(siteData)
+      .select()
+      .single();
+
+    if (error) throw error;
+    logger.info('Free scan site created', { id: data.id, url });
+    return data;
+  } catch (error) {
+    logger.error('Failed to create/update free scan site', { url, error: error.message });
+    throw error;
+  }
+}
+
+/**
  * Deletes a site and its associated scan results (via CASCADE).
  * @param {string} siteId - Site UUID.
  */
@@ -175,5 +239,6 @@ module.exports = {
   getSiteById,
   getUserSiteById,
   getMonitoredSites,
+  createOrUpdateFreeScanSite,
   deleteSite,
 };

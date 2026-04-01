@@ -7,6 +7,7 @@ interface AdminSite {
   id: string;
   user_id: string | null;
   user_email: string | null;
+  site_type: 'authenticated' | 'free_scan';
   url: string;
   name: string | null;
   created_at: string;
@@ -120,7 +121,7 @@ export default function AdminSitesPage() {
         <div>
           <h1 className="text-2xl font-bold text-white">Sites</h1>
           <p className="text-sm text-slate-400 mt-1">
-            Track site-level owner and sales contact details
+            Track site owner & sales contact (includes free scans & authenticated users)
           </p>
         </div>
         <button
@@ -143,7 +144,8 @@ export default function AdminSitesPage() {
             <thead>
               <tr className="border-b border-white/10 text-left">
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Site</th>
-                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">User</th>
+                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Type</th>
+                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Account Email</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Owner</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Owner Email</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Sales Contact</th>
@@ -154,14 +156,14 @@ export default function AdminSitesPage() {
             <tbody className="divide-y divide-white/5">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
+                  <td colSpan={8} className="px-4 py-12 text-center text-slate-500">
                     <RefreshCw className="h-5 w-5 animate-spin mx-auto mb-2" />
                     Loading sites...
                   </td>
                 </tr>
               ) : !data || data.sites.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
+                  <td colSpan={8} className="px-4 py-12 text-center text-slate-500">
                     No sites found
                   </td>
                 </tr>
@@ -183,8 +185,19 @@ export default function AdminSitesPage() {
                           {site.url}
                         </div>
                       </td>
+                      <td className="px-4 py-3 min-w-[110px]">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                            site.site_type === 'free_scan'
+                              ? 'bg-slate-500/10 text-slate-300'
+                              : 'bg-brand-500/10 text-brand-300'
+                          }`}
+                        >
+                          {site.site_type === 'free_scan' ? 'Free Scan' : 'User Account'}
+                        </span>
+                      </td>
                       <td className="px-4 py-3 min-w-[200px] text-xs text-slate-400">
-                        {site.user_email || 'Free scan / no account'}
+                        {site.user_email || '—'}
                       </td>
                       <td className="px-4 py-3 min-w-[170px]">
                         <input
