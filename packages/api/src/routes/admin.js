@@ -176,7 +176,6 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
       to: site.owner_email,
       subject: parsed.data.subject,
       text: parsed.data.message,
-      from: 'contact@adashield.io',
     });
 
     // Mark site as contacted

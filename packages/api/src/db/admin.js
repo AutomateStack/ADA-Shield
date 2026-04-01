@@ -376,10 +376,18 @@ async function getSiteById(siteId) {
  */
 async function markSiteAsContacted(siteId) {
   try {
+    // Fetch current count first (supabase-js v2 has no raw() increment)
+    const { data: current, error: fetchError } = await supabase
+      .from('sites')
+      .select('contacted_count')
+      .eq('id', siteId)
+      .single();
+    if (fetchError) throw fetchError;
+
     const { data, error } = await supabase
       .from('sites')
       .update({
-        contacted_count: supabase.raw('contacted_count + 1'),
+        contacted_count: (current?.contacted_count || 0) + 1,
         last_contacted_at: new Date().toISOString(),
       })
       .eq('id', siteId)
