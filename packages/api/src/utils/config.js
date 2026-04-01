@@ -31,7 +31,7 @@ const OPTIONAL_VARS = {
   NODE_ENV: 'development',
   LOG_LEVEL: 'info',
   DASHBOARD_URL: 'http://localhost:3000',
-  EMAIL_FROM: 'ADA Shield <tthirmal@gmail.com>',
+  EMAIL_FROM: 'ADA Shield <onboarding@resend.dev>',
 };
 
 /**
