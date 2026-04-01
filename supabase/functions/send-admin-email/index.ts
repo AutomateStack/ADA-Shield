@@ -112,15 +112,13 @@ Deno.serve(async (req) => {
 <!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-  <div style="max-width:600px;margin:0 auto;padding:40px 20px;">
-    <div style="text-align:center;margin-bottom:32px;">
-      <h1 style="color:#818cf8;font-size:24px;margin:0;">ADA Shield</h1>
-    </div>
-    <div style="background:#1e293b;border-radius:12px;padding:32px;border:1px solid rgba(255,255,255,0.1);">
-      <h2 style="color:#fff;font-size:20px;margin:0 0 8px;">${subject}</h2>
-      <p style="color:#94a3b8;margin:0 0 16px;">Regarding: <strong style="color:#fff;">${siteName}</strong>${siteUrl ? ` (${siteUrl})` : ''}</p>
-      <div style="color:#cbd5e1;line-height:1.6;white-space:pre-wrap;word-wrap:break-word;">${escapeHtml(message)}</div>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+  <div style="max-width:640px;margin:0 auto;padding:24px 16px;">
+    <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;padding:24px;">
+      <h1 style="font-size:18px;margin:0 0 12px;color:#0f172a;">${subject}</h1>
+      <p style="margin:0 0 16px;color:#475569;font-size:13px;">Regarding ${siteName}${siteUrl ? ` (${siteUrl})` : ''}</p>
+      <div style="font-size:15px;line-height:1.7;white-space:pre-wrap;word-wrap:break-word;">${escapeHtml(message)}</div>
+      <p style="margin:20px 0 0;color:#64748b;font-size:12px;">Sent via ADA Shield</p>
     </div>
   </div>
 </body>

@@ -54,6 +54,11 @@ interface EmailModal {
   message: string;
 }
 
+interface EmailTemplateResponse {
+  subject: string;
+  message: string;
+}
+
 export default function AdminSitesPage() {
   const [data, setData] = useState<SitesResponse | null>(null);
   const [page, setPage] = useState(1);
@@ -63,6 +68,7 @@ export default function AdminSitesPage() {
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [emailModal, setEmailModal] = useState<EmailModal | null>(null);
   const [emailSending, setEmailSending] = useState(false);
+  const [emailTemplateLoading, setEmailTemplateLoading] = useState(false);
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
   const adminSecret = process.env.NEXT_PUBLIC_ADMIN_SECRET || '';
@@ -136,14 +142,46 @@ export default function AdminSitesPage() {
     }
   };
 
-  const openEmailModal = (site: AdminSite) => {
+  const openEmailModal = async (site: AdminSite) => {
     setEmailModal({
       siteId: site.id,
       siteName: site.name || 'Unnamed site',
       ownerEmail: site.owner_email || '',
-      subject: '',
-      message: '',
+      subject: 'Loading template...',
+      message: 'Preparing a personalized outreach message from recent scan data...',
     });
+
+    setEmailTemplateLoading(true);
+    try {
+      const res = await fetch(`${apiUrl}/api/admin/sites/${site.id}/email-template`, {
+        headers: { 'x-admin-secret': adminSecret },
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to load email template');
+      }
+
+      const payload: EmailTemplateResponse = await res.json();
+      setEmailModal((prev) => {
+        if (!prev || prev.siteId !== site.id) return prev;
+        return {
+          ...prev,
+          subject: payload.subject,
+          message: payload.message,
+        };
+      });
+    } catch (err: any) {
+      setEmailModal((prev) => {
+        if (!prev || prev.siteId !== site.id) return prev;
+        return {
+          ...prev,
+          subject: `Is ${site.name || 'your restaurant'} protected from ADA lawsuits?`,
+          message: `Hi there,\n\nQuick question - has anyone ever mentioned ADA website compliance to you?\n\nI ask because I scanned ${site.name || 'your website'} and found issues that match what plaintiff lawyers look for.\n\nFree scan here: https://ada-shield-dashboard.vercel.app\n\nThirmal\nADA Shield`,
+        };
+      });
+    } finally {
+      setEmailTemplateLoading(false);
+    }
   };
 
   const sendEmail = async () => {
@@ -364,6 +402,7 @@ export default function AdminSitesPage() {
                     setEmailModal({ ...emailModal, subject: e.target.value })
                   }
                   placeholder="Email subject"
+                  disabled={emailTemplateLoading}
                   className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500"
                 />
               </div>
@@ -376,7 +415,8 @@ export default function AdminSitesPage() {
                     setEmailModal({ ...emailModal, message: e.target.value })
                   }
                   placeholder="Your message..."
-                  rows={6}
+                  rows={14}
+                  disabled={emailTemplateLoading}
                   className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
                 />
               </div>
@@ -391,7 +431,7 @@ export default function AdminSitesPage() {
               </button>
               <button
                 onClick={sendEmail}
-                disabled={emailSending}
+                disabled={emailSending || emailTemplateLoading}
                 className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {emailSending ? (
