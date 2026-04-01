@@ -272,8 +272,57 @@ async function sendWeeklySummaryEmail({ to, sites, dashboardUrl }) {
   }
 }
 
+/**
+ * Sends a generic email (used for admin outreach).
+ */
+async function sendEmail({ to, subject, text, from = EMAIL_FROM }) {
+  const resend = getResendClient();
+  if (!resend) {
+    logger.warn('Resend not configured — skipping email');
+    return null;
+  }
+
+  const sanitizedSubject = sanitizeSubject(subject);
+  const safeText = escapeHtml(text);
+
+  try {
+    const { data, error } = await resend.emails.send({
+      from,
+      to,
+      subject: sanitizedSubject,
+      html: `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <div style="max-width:600px;margin:0 auto;padding:40px 20px;">
+    <div style="text-align:center;margin-bottom:32px;">
+      <h1 style="color:#818cf8;font-size:24px;margin:0;">🛡️ ADA Shield</h1>
+    </div>
+    <div style="background:#1e293b;border-radius:12px;padding:32px;border:1px solid rgba(255,255,255,0.1);">
+      <h2 style="color:#fff;font-size:20px;margin:0 0 24px;">${sanitizedSubject}</h2>
+      <div style="color:#cbd5e1;line-height:1.6;white-space:pre-wrap;word-wrap:break-word;">${safeText}</div>
+    </div>
+    <p style="color:#475569;font-size:12px;text-align:center;margin-top:24px;">
+      You're receiving this from ADA Shield.
+    </p>
+  </div>
+</body>
+</html>`,
+    });
+
+    if (error) throw error;
+    logger.info('Email sent', { to, subject: sanitizedSubject, messageId: data?.id });
+    return data;
+  } catch (error) {
+    logger.error('Failed to send email', { to, subject: sanitizedSubject, error: error.message });
+    throw error;
+  }
+}
+
 module.exports = {
   sendScanCompleteEmail,
   sendRiskAlertEmail,
   sendWeeklySummaryEmail,
+  sendEmail,
 };
