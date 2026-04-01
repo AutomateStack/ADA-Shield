@@ -3,7 +3,7 @@ const { z } = require('zod');
 const { scanPage } = require('@ada-shield/scanner');
 const { calculateRiskScore } = require('@ada-shield/scanner');
 const { getUserSubscription, PLAN_LIMITS } = require('../db/subscriptions');
-const { getUserSites, getUserSiteById } = require('../db/sites');
+const { getUserSites, getUserSiteById, createOrUpdateFreeScanSite } = require('../db/sites');
 const { saveScanResult, updateSiteLastScanned, getPublicScanByToken } = require('../db/scans');
 const { createRateLimiter, createUserRateLimiter } = require('../middleware/rate-limiter');
 const { authenticate } = require('../middleware/auth');
@@ -47,16 +47,30 @@ router.post(
 
       logger.info('Free scan requested', { url, ip: req.ip });
 
-      // Run scan synchronously for free scans (single page; results limited to 3 violations)
+      // Run scan synchronously for free scans (single page; results limited to 2 violations)
       const scanResult = await scanPage(url);
       const riskResult = calculateRiskScore(scanResult.violations);
+
+      // Create or update free scan site with extracted metadata
+      let siteId = null;
+      try {
+        const freeSite = await createOrUpdateFreeScanSite({
+          url: scanResult.url,
+          ownerName: scanResult.pageMetadata?.companyName,
+          ownerEmail: scanResult.pageMetadata?.contactEmail,
+        });
+        siteId = freeSite?.id || null;
+      } catch (siteErr) {
+        logger.error('Failed to create/update free scan site', { url: scanResult.url, error: siteErr.message });
+        // Don't fail the scan if site linking fails
+      }
 
       // Persist full scan result to DB (fire-and-forget — don't block the response)
       let publicToken = null;
       try {
         const saved = await saveScanResult({
           url: scanResult.url,
-          siteId: null,
+          siteId,
           userId: null,
           riskScore: riskResult.score,
           totalViolations: scanResult.totalViolations,
