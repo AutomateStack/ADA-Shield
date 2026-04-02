@@ -88,6 +88,9 @@ async function sendScanCompleteEmail({ to, siteName, siteUrl, riskScore, riskLev
   const subjectSiteName = sanitizeSubject(siteName);
   const safeSiteName = escapeHtml(siteName);
 
+    // Detect industry and get industry-specific context
+    const industry = detectIndustry(siteUrl);
+    const { title, riskContext, callSignal } = getIndustryContext(industry, siteName);
   try {
     const { data, error } = await resend.emails.send({
       from: getVerifiedFromAddress(EMAIL_FROM),
@@ -133,6 +136,11 @@ async function sendScanCompleteEmail({ to, siteName, siteUrl, riskScore, riskLev
         <h1>🛡️ ADA Shield</h1>
       </div>
       <div class="content-box">
+          <div style="background: rgba(99, 102, 241, 0.1); border-left: 4px solid #6366f1; padding: 16px; border-radius: 6px; margin: 20px 0;">
+            <p style="color: #818cf8; font-weight: 600; margin: 0 0 8px;">Why This Matters</p>
+            <p style="color: #94a3b8; margin: 0; line-height: 1.6;">${riskContext}</p>
+          </div>
+
         <h2>✓ Scan Complete</h2>
         <p>Your accessibility scan for <span class="strong">${safeSiteName}</span> has finished.</p>
         
@@ -155,6 +163,10 @@ async function sendScanCompleteEmail({ to, siteName, siteUrl, riskScore, riskLev
               <span class="stat-number">${seriousCount}</span>
               <span class="stat-label">Serious</span>
             </td>
+          <div style="background: rgba(34, 197, 94, 0.1); border-left: 4px solid #22c55e; padding: 16px; border-radius: 6px; margin: 20px 0;">
+            <p style="color: #22c55e; font-weight: 600; margin: 0 0 8px;">Next Steps</p>
+            <p style="color: #94a3b8; margin: 0; line-height: 1.6;">${callSignal}</p>
+          </div>
           </tr>
         </table>
 
@@ -194,6 +206,9 @@ async function sendRiskAlertEmail({ to, siteName, siteUrl, riskScore, criticalCo
   const safeSiteUrl = escapeHtml(siteUrl);
   const subjectSiteName = sanitizeSubject(siteName);
 
+  // Detect industry and get industry-specific context
+  const industry = detectIndustry(siteUrl);
+  const { title, riskContext, callSignal } = getIndustryContext(industry, siteName);
   try {
     const { data, error } = await resend.emails.send({
       from: getVerifiedFromAddress(EMAIL_FROM),
@@ -246,6 +261,11 @@ async function sendRiskAlertEmail({ to, siteName, siteUrl, riskScore, criticalCo
           <span class="risk-value">${riskScore}/100</span>, which indicates a high probability of ADA-related legal action.
         </p>
         
+          <div style="background: rgba(239, 68, 68, 0.1); border-left: 4px solid #ef4444; padding: 16px; border-radius: 6px; margin: 20px 0;">
+            <p style="color: #ef4444; font-weight: 600; margin: 0 0 8px;">Why This is Urgent</p>
+            <p style="color: #94a3b8; margin: 0; line-height: 1.6;">${riskContext}</p>
+          </div>
+
         <div class="issues-box">
           <p>Issues Found:</p>
           <div class="issues-list">
@@ -254,7 +274,7 @@ async function sendRiskAlertEmail({ to, siteName, siteUrl, riskScore, criticalCo
           </div>
         </div>
 
-        <p>We recommend addressing critical violations immediately to reduce your risk exposure.</p>
+          <p><strong>Immediate Action Required:</strong> ${callSignal}</p>
 
         <div style="text-align: center;">
           <a href="${dashboardUrl}" class="cta-button">Fix Issues Now →</a>
@@ -467,4 +487,6 @@ module.exports = {
   sendWeeklySummaryEmail,
   sendEmail,
   getVerifiedFromAddress,
+  detectIndustry,
+  getIndustryContext,
 };
