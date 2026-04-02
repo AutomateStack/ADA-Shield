@@ -606,7 +606,10 @@ export default function AdminSitesPage() {
             <div className="flex items-center justify-between p-6 border-b border-white/10">
               <div>
                 <h2 className="text-lg font-bold text-white">Send Email to {emailModal.siteName}</h2>
-                <p className="text-sm text-slate-400 mt-1 break-all">{emailModal.recipientSummary}</p>
+                <div className="mt-2 space-y-1">
+                  <p className="text-xs text-slate-400"><strong>To:</strong> <span className="break-all">{emailModal.recipientSummary}</span></p>
+                  <p className="text-xs text-slate-500"><strong>CC:</strong> tthirmal@gmail.com (monitoring)</p>
+                </div>
               </div>
               <button
                 onClick={() => setEmailModal(null)}
