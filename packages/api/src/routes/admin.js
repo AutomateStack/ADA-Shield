@@ -134,7 +134,12 @@ router.get('/sites', async (req, res, next) => {
       contracted = req.query.contracted === 'true' ? true : req.query.contracted === 'false' ? false : undefined;
     }
 
-    const result = await getAdminSites({ page, limit, sortBy, sortOrder, type, contracted });
+    let risk = undefined;
+    if (req.query.risk && ['high', 'medium', 'low', 'unscanned'].includes(String(req.query.risk))) {
+      risk = String(req.query.risk);
+    }
+
+    const result = await getAdminSites({ page, limit, sortBy, sortOrder, type, contracted, risk });
     return res.json(result);
   } catch (error) {
     next(error);
