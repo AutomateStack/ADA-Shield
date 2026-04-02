@@ -26,8 +26,7 @@ const { sendEmail, detectIndustry, getIndustryContext } = require('../services/e
 const router = Router();
 
 const FIXED_ADMIN_CC_RECIPIENTS = [
-  'info@cedaroakinsurance.com',
-  'security.support@prowritersins.com',
+  'tthirmal@gmail.com',
 ];
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -385,6 +384,22 @@ function inferCityFromUrl(url) {
   }
 }
 
+function getIndustryYearlyStatistics(industry) {
+  const stats = {
+    restaurant: '300+ ADA lawsuits filed annually in food service',
+    insurance: '250+ ADA claims per year against insurance providers',
+    healthcare: '400+ ADA accessibility cases yearly in healthcare',
+    finance: '350+ ADA lawsuits annually affecting financial services',
+    ecommerce: '500+ ADA accessibility disputes yearly in retail',
+    education: '280+ ADA cases filed against educational institutions',
+    tech: '350+ ADA lawsuits targeting technology companies annually',
+    government: '450+ public sector ADA violations addressed yearly',
+    manufacturing: '180+ ADA accessibility cases in manufacturing sector',
+    generic: '15,000+ digital accessibility lawsuits filed annually in the US',
+  };
+  return stats[industry] || stats.generic;
+}
+
 function normalizeStyle(style) {
   const allowed = new Set(['fear_urgency', 'friendly_educational', 'concise_direct']);
   return allowed.has(style) ? style : null;
@@ -415,9 +430,9 @@ function formatIndustryLabel(industry) {
 function buildEmailTemplates({ firstName, siteName, issueText, riskScore, industry }) {
   const dashboardUrl = 'https://ada-shield-dashboard.vercel.app';
   const supportLine = 'If you have any questions, you can reach me at tthirmal@gmail.com.';
-  const industryLabel = formatIndustryLabel(industry);
-  const { riskContext, callSignal } = getIndustryContext(industry);
   const riskScoreText = Number.isFinite(riskScore) ? `${riskScore}/100` : 'elevated';
+  const { riskContext, callSignal } = getIndustryContext(industry);
+  const yearlyStats = getIndustryYearlyStatistics(industry);
 
   const templates = {
     fear_urgency: {
@@ -426,8 +441,8 @@ function buildEmailTemplates({ firstName, siteName, issueText, riskScore, indust
 
 I ran an ADA accessibility check for ${siteName} and found ${issueText} issues that can increase legal risk.
 
-Industry profile: ${industryLabel}
 Risk signal: ${riskScoreText}
+${yearlyStats}
 
 Why this matters:
 ${riskContext}
@@ -452,11 +467,11 @@ ADA Shield`,
 
 I reviewed ${siteName} and found ${issueText} accessibility items worth fixing.
 
-Industry profile: ${industryLabel}
+${yearlyStats}
 
 Accessibility improvements help reduce legal exposure and improve user experience for all visitors.
 
-Context for your industry:
+Context:
 ${riskContext}
 
 ADA Shield can help with:
@@ -476,8 +491,8 @@ ADA Shield`,
 
 I scanned ${siteName} and found ${issueText} ADA-related issues.
 
-Industry: ${industryLabel}
 Risk signal: ${riskScoreText}
+${yearlyStats}
 
 Why this matters:
 ${riskContext}
@@ -574,27 +589,26 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
     let deliveryChannel = 'supabase-function';
     let providerMessageId = null;
 
-    // Collect all recipients: owner email + notification recipients list
-    const allRecipients = new Set();
-    if (site.owner_email) allRecipients.add(site.owner_email);
+    // Collect all site-related recipients for TO list (owner + notification recipients)
+    const toRecipients = new Set();
+    if (site.owner_email) toRecipients.add(site.owner_email);
     if (site.notification_recipients && Array.isArray(site.notification_recipients)) {
-      site.notification_recipients.forEach((email) => allRecipients.add(email));
+      site.notification_recipients.forEach((email) => toRecipients.add(email));
     }
-      FIXED_ADMIN_CC_RECIPIENTS.forEach((email) => allRecipients.add(email));
 
-    if (allRecipients.size === 0) {
+    if (toRecipients.size === 0) {
       return res.status(400).json({ error: 'No recipient emails configured for this site' });
     }
 
-    const recipientList = Array.from(allRecipients);
-    const primaryRecipient = recipientList[0];
-    const ccRecipients = recipientList.slice(1);
+    // Fixed admin CC (only thermal for monitoring)
+    const ccRecipients = FIXED_ADMIN_CC_RECIPIENTS;
+    const toList = Array.from(toRecipients).join(',');
 
     // Primary path: Supabase Edge Function (Resend)
     // Fallback path: direct API-side sendEmail if function call fails.
     try {
       const response = await invokeSupabaseFunction('send-admin-email', {
-        to: primaryRecipient,
+        to: toList,
         cc: ccRecipients.length > 0 ? ccRecipients : undefined,
         subject: parsed.data.subject,
         message: parsed.data.message,
@@ -606,7 +620,7 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
     } catch (edgeError) {
       logger.warn('Edge function send failed, using local email fallback', {
         siteId: site.id,
-        to: primaryRecipient,
+        to: toList,
         cc: ccRecipients,
         error: edgeError.message,
       });
@@ -614,7 +628,7 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
       try {
         deliveryChannel = 'api-fallback';
         const fallbackResponse = await sendEmail({
-          to: primaryRecipient,
+          to: toList,
           subject: parsed.data.subject,
           text: parsed.data.message,
           cc: ccRecipients,
@@ -627,14 +641,16 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
         return res.status(400).json({
           error: userMessage,
           details: providerMessage,
-             recipient: primaryRecipient,
+             recipient: toList,
         });
       }
     }
 
+    // Log the first recipient for contact history
+    const firstToRecipient = Array.from(toRecipients)[0];
     await createSiteContactHistoryEntry({
       siteId: site.id,
-         recipientEmail: primaryRecipient,
+         recipientEmail: firstToRecipient,
       subject: parsed.data.subject,
       message: parsed.data.message,
       templateStyle: parsed.data.templateStyle || null,
