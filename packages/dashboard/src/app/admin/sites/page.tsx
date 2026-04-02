@@ -114,6 +114,7 @@ export default function AdminSitesPage() {
   const [historyData, setHistoryData] = useState<ContactHistoryResponse | null>(null);
   const [filterType, setFilterType] = useState<'all' | 'free' | 'admin' | 'registered'>('all');
   const [filterContracted, setFilterContracted] = useState<'all' | 'yes' | 'no'>('all');
+  const [filterRisk, setFilterRisk] = useState<'all' | 'high' | 'medium' | 'low' | 'unscanned'>('all');
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
   const adminSecret = process.env.NEXT_PUBLIC_ADMIN_SECRET || '';
@@ -136,6 +137,9 @@ export default function AdminSitesPage() {
         params.set('contracted', 'true');
       } else if (filterContracted === 'no') {
         params.set('contracted', 'false');
+      }
+      if (filterRisk !== 'all') {
+        params.set('risk', filterRisk);
       }
 
       const res = await fetch(
@@ -160,7 +164,7 @@ export default function AdminSitesPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiUrl, adminSecret, page, sortBy, sortOrder, filterType, filterContracted]);
+  }, [apiUrl, adminSecret, page, sortBy, sortOrder, filterType, filterContracted, filterRisk]);
 
   useEffect(() => {
     fetchSites();
@@ -338,6 +342,11 @@ export default function AdminSitesPage() {
     setPage(1); // Reset to first page when filter changes
   };
 
+  const handleFilterRiskChange = (newRisk: 'all' | 'high' | 'medium' | 'low' | 'unscanned') => {
+    setFilterRisk(newRisk);
+    setPage(1); // Reset to first page when filter changes
+  };
+
   const onTemplateStyleChange = (style: EmailTemplateStyle) => {
     setEmailModal((prev) => {
       if (!prev) return prev;
@@ -405,11 +414,27 @@ export default function AdminSitesPage() {
           </select>
         </div>
 
-        {(filterType !== 'all' || filterContracted !== 'all') && (
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-medium text-slate-300">New Risk:</label>
+          <select
+            value={filterRisk}
+            onChange={(e) => handleFilterRiskChange(e.target.value as any)}
+            className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white hover:bg-white/10 focus:bg-white/10 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          >
+            <option value="all">All</option>
+            <option value="high">High (70-100)</option>
+            <option value="medium">Medium (40-69)</option>
+            <option value="low">Low (0-39)</option>
+            <option value="unscanned">Unscanned</option>
+          </select>
+        </div>
+
+        {(filterType !== 'all' || filterContracted !== 'all' || filterRisk !== 'all') && (
           <button
             onClick={() => {
               setFilterType('all');
               setFilterContracted('all');
+              setFilterRisk('all');
               setPage(1);
             }}
             className="px-3 py-2 text-sm text-slate-300 hover:text-white bg-white/5 border border-white/10 rounded-lg transition-colors"
@@ -426,7 +451,7 @@ export default function AdminSitesPage() {
               <tr className="border-b border-white/10 text-left">
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Site</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Status</th>
-                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Most Recent Risk</th>
+                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">New Risk</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Recipients</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">
                   <button
@@ -499,7 +524,15 @@ export default function AdminSitesPage() {
                       </td>
                       <td className="px-4 py-3 min-w-[170px]">
                         {typeof site.latest_risk_score === 'number' ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-500/10 text-red-300">
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${
+                              site.latest_risk_score >= 70
+                                ? 'bg-red-500/10 text-red-400'
+                                : site.latest_risk_score >= 40
+                                ? 'bg-amber-500/10 text-amber-400'
+                                : 'bg-green-500/10 text-green-400'
+                            }`}
+                          >
                             {site.latest_risk_score}/100
                           </span>
                         ) : (
