@@ -278,19 +278,35 @@ async function getAdminScanDetail(scanId) {
  * @param {object} params
  * @param {number} [params.page=1]
  * @param {number} [params.limit=20]
+ * @param {string} [params.type] - Filter by type: 'free' | 'admin' | 'registered'
+ * @param {boolean} [params.contracted] - Filter by contracted (contacted_count > 0)
  */
-async function getAdminSites({ page = 1, limit = 20, sortBy = 'created_at', sortOrder = 'desc' } = {}) {
+async function getAdminSites({ page = 1, limit = 20, sortBy = 'created_at', sortOrder = 'desc', type, contracted } = {}) {
   try {
     const allowedSortBy = new Set(['created_at', 'contacted_count', 'last_contacted_at']);
     const normalizedSortBy = allowedSortBy.has(sortBy) ? sortBy : 'created_at';
     const normalizedSortOrder = sortOrder === 'asc' ? 'asc' : 'desc';
 
-    const { data, error, count } = await supabase
+    let query = supabase
       .from('sites')
       .select(
-        'id, user_id, url, name, created_at, owner_name, owner_email, notification_recipients, contacted_count, last_contacted_at',
+        'id, user_id, url, name, created_at, owner_name, owner_email, notification_recipients, contacted_count, last_contacted_at, type',
         { count: 'exact' }
-      )
+      );
+
+    // Apply type filter if provided
+    if (type && ['free', 'admin', 'registered'].includes(type)) {
+      query = query.eq('type', type);
+    }
+
+    // Apply contracted filter if provided
+    if (contracted === true) {
+      query = query.gt('contacted_count', 0);
+    } else if (contracted === false) {
+      query = query.eq('contacted_count', 0);
+    }
+
+    const { data, error, count } = await query
       .order(normalizedSortBy, { ascending: normalizedSortOrder === 'asc', nullsFirst: normalizedSortOrder !== 'asc' })
       .order('created_at', { ascending: false })
       .range((page - 1) * limit, page * limit - 1);
@@ -343,7 +359,7 @@ async function updateAdminSiteMetadata(siteId, patch) {
       .update(patch)
       .eq('id', siteId)
       .select(
-        'id, user_id, url, name, created_at, owner_name, owner_email, notification_recipients, contacted_count, last_contacted_at'
+        'id, user_id, url, name, created_at, owner_name, owner_email, notification_recipients, contacted_count, last_contacted_at, type'
       )
       .single();
 
@@ -363,7 +379,7 @@ async function getSiteById(siteId) {
   try {
     const { data, error } = await supabase
       .from('sites')
-      .select('id, url, name, owner_name, owner_email, notification_recipients, user_id, created_at, contacted_count, last_contacted_at')
+      .select('id, url, name, owner_name, owner_email, notification_recipients, user_id, created_at, contacted_count, last_contacted_at, type')
       .eq('id', siteId)
       .single();
 

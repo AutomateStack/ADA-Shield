@@ -163,7 +163,7 @@ async function getMonitoredSites() {
  * @param {string} [params.ownerEmail] - Extracted contact email.
  * @returns {Promise<object>} The site row.
  */
-async function createOrUpdateFreeScanSite({ url, ownerName, ownerEmail }) {
+async function createOrUpdateFreeScanSite({ url, ownerName, ownerEmail, type = 'free' }) {
   try {
     // Try to find existing free scan site by URL
     const { data: existing } = await supabase
@@ -201,6 +201,7 @@ async function createOrUpdateFreeScanSite({ url, ownerName, ownerEmail }) {
       owner_name: ownerName || null,
       owner_email: ownerEmail || null,
       pages_to_scan: 1,
+      type,
     };
 
     const { data, error } = await supabase
@@ -210,7 +211,7 @@ async function createOrUpdateFreeScanSite({ url, ownerName, ownerEmail }) {
       .single();
 
     if (error) throw error;
-    logger.info('Free scan site created', { id: data.id, url });
+    logger.info('Free scan site created', { id: data.id, url, type });
     return data;
   } catch (error) {
     logger.error('Failed to create/update free scan site', { url, error: error.message });
