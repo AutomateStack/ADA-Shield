@@ -73,6 +73,77 @@ function getVerifiedFromAddress(from) {
   return candidate;
 }
 
+function detectIndustry(url) {
+  const urlLower = String(url || '').toLowerCase();
+
+  const industryPatterns = {
+    restaurant: ['restaurant', 'food', 'dining', 'cafe', 'pizzeria', 'bistro', 'bakery', 'diner', 'grill', 'pub', 'brewery'],
+    insurance: ['insurance', 'mutual', 'underwriting', 'insurer'],
+    healthcare: ['health', 'clinic', 'medical', 'hospital', 'doctor', 'physician', 'dentist', 'dental', 'pharma', 'pharmacy', 'therapy', 'wellness'],
+    finance: ['bank', 'credit', 'finance', 'investment', 'mortgage', 'lending', 'financial', 'banking', 'brokerage'],
+    ecommerce: ['shop', 'store', 'ecommerce', 'retail', 'market', 'shopify'],
+    education: ['school', 'university', 'college', 'academy', 'institute', 'learning', 'course'],
+    tech: ['tech', 'software', 'app', 'digital', 'dev', 'code', 'saas', 'platform'],
+    government: ['gov', 'municipality', 'county', 'city', 'state', 'federal', 'public'],
+    manufacturing: ['manufacturing', 'factory', 'industrial', 'mfg', 'production'],
+  };
+
+  for (const [industry, patterns] of Object.entries(industryPatterns)) {
+    if (patterns.some((pattern) => urlLower.includes(pattern))) {
+      return industry;
+    }
+  }
+
+  return 'generic';
+}
+
+function getIndustryContext(industry) {
+  const contexts = {
+    restaurant: {
+      riskContext: 'Restaurants are frequent ADA lawsuit targets, and inaccessible menus, booking flows, and location details can create immediate legal exposure.',
+      callSignal: 'Prioritize fixes on navigation, menus, forms, and mobile usability to reduce risk quickly.',
+    },
+    insurance: {
+      riskContext: 'Insurance providers face strong accessibility expectations because quotes, claims, and policy information must be available to all users.',
+      callSignal: 'Focus on quote flows, policy documents, forms, and account access to reduce compliance risk.',
+    },
+    healthcare: {
+      riskContext: 'Healthcare websites must give all patients accessible access to appointments, provider information, and care resources.',
+      callSignal: 'Prioritize appointment flows, contact forms, patient resources, and core navigation.',
+    },
+    finance: {
+      riskContext: 'Financial services sites face elevated compliance and trust requirements, especially around forms, account access, and disclosures.',
+      callSignal: 'Address login, application forms, disclosures, calculators, and document access first.',
+    },
+    ecommerce: {
+      riskContext: 'E-commerce sites are often challenged over inaccessible product discovery, cart flows, and checkout experiences.',
+      callSignal: 'Prioritize product pages, search, cart interactions, and checkout accessibility.',
+    },
+    education: {
+      riskContext: 'Educational institutions are expected to make admissions, course information, and learning resources accessible to all users.',
+      callSignal: 'Focus on admissions flows, course pages, documents, and student resource access.',
+    },
+    tech: {
+      riskContext: 'Technology companies are expected to meet modern accessibility standards across marketing sites and product experiences.',
+      callSignal: 'Address sign-up flows, dashboards, documentation, and product UI accessibility.',
+    },
+    government: {
+      riskContext: 'Public sector websites are held to high accessibility standards because essential services must remain available to all constituents.',
+      callSignal: 'Prioritize service pages, forms, documents, and primary navigation pathways.',
+    },
+    manufacturing: {
+      riskContext: 'Manufacturing and industrial sites still face accessibility obligations for customer, partner, and recruiting experiences.',
+      callSignal: 'Focus on contact forms, product catalogs, careers pages, and technical document access.',
+    },
+    generic: {
+      riskContext: 'Web accessibility is a legal and business requirement across industries, especially for core user journeys and contact paths.',
+      callSignal: 'Start with the highest-risk issues on navigation, forms, images, and keyboard access.',
+    },
+  };
+
+  return contexts[industry] || contexts.generic;
+}
+
 /**
  * Sends a scan-complete email with the risk score summary.
  */
