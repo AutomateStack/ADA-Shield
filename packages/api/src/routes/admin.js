@@ -159,6 +159,33 @@ const sendEmailSchema = z.object({
   templateStyle: z.enum(['fear_urgency', 'friendly_educational', 'concise_direct']).optional(),
 });
 
+function getEmailSendFailureMessage(rawMessage) {
+  const message = String(rawMessage || 'Failed to send email');
+  const lower = message.toLowerCase();
+
+  if (
+    lower.includes('verify') && lower.includes('domain') ||
+    lower.includes('domain not verified')
+  ) {
+    return 'Email sender domain is not verified in Resend. Verify your domain and set EMAIL_FROM to that domain.';
+  }
+
+  if (
+    lower.includes('testing emails') ||
+    lower.includes('test emails') ||
+    lower.includes('only send') && lower.includes('own email') ||
+    lower.includes('onboarding@resend.dev')
+  ) {
+    return 'Resend test mode restriction: onboarding@resend.dev can send only to limited/test recipients. Verify a custom domain and use EMAIL_FROM on that domain to send to any address.';
+  }
+
+  if (lower.includes('invalid') && lower.includes('email')) {
+    return 'Recipient email appears invalid. Please check the owner email and try again.';
+  }
+
+  return message;
+}
+
 function extractFirstName(ownerName) {
   if (!ownerName) return 'there';
   const first = String(ownerName).trim().split(/\s+/)[0];
@@ -356,13 +383,24 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
         error: edgeError.message,
       });
 
-      deliveryChannel = 'api-fallback';
-      const fallbackResponse = await sendEmail({
-        to: site.owner_email,
-        subject: parsed.data.subject,
-        text: parsed.data.message,
-      });
-      providerMessageId = fallbackResponse?.id || null;
+      try {
+        deliveryChannel = 'api-fallback';
+        const fallbackResponse = await sendEmail({
+          to: site.owner_email,
+          subject: parsed.data.subject,
+          text: parsed.data.message,
+        });
+        providerMessageId = fallbackResponse?.id || null;
+      } catch (fallbackError) {
+        const providerMessage = fallbackError?.message || edgeError?.message || 'Failed to send email';
+        const userMessage = getEmailSendFailureMessage(providerMessage);
+
+        return res.status(400).json({
+          error: userMessage,
+          details: providerMessage,
+          recipient: site.owner_email,
+        });
+      }
     }
 
     await createSiteContactHistoryEntry({

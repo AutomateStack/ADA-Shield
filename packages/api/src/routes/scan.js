@@ -213,6 +213,7 @@ router.post(
         siteId,
         userId,
         userEmail: req.user.email || null,
+        siteOwnerEmail: site.owner_email || null,
         siteName: site.name || new URL(site.url).hostname,
         pageLimit: effectivePageLimit,
       });

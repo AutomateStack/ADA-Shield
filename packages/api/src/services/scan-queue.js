@@ -130,7 +130,7 @@ function initScanWorker() {
   scanWorker = new Worker(
     QUEUE_NAME,
     async (job) => {
-      const { url, siteId, userId, userEmail, siteName, pageLimit } = job.data;
+      const { url, siteId, userId, userEmail, siteOwnerEmail, siteName, pageLimit } = job.data;
 
       logger.info('Processing scan job', { jobId: job.id, url, attempt: job.attemptsMade + 1 });
 
@@ -166,35 +166,43 @@ function initScanWorker() {
       await updateSiteLastScanned(siteId);
 
       // Send notification emails (non-blocking)
-      if (userEmail) {
+      // Collect recipients: user + site owner (if different)
+      const recipients = new Set();
+      if (userEmail) recipients.add(userEmail);
+      if (siteOwnerEmail && siteOwnerEmail !== userEmail) recipients.add(siteOwnerEmail);
+
+      if (recipients.size > 0) {
         const prefs = await getNotificationPrefs(userId);
         const resolvedSiteName = siteName || new URL(url).hostname;
 
-        if (prefs.scan_complete) {
-          sendScanCompleteEmail({
-            to: userEmail,
-            siteName: resolvedSiteName,
-            siteUrl: url,
-            riskScore: riskResult.score,
-            riskLevel: riskResult.level,
-            totalViolations: scanResult.totalViolations,
-            criticalCount: scanResult.criticalCount,
-            seriousCount: scanResult.seriousCount,
-            dashboardUrl: `${dashboardUrl}/dashboard/sites/${siteId}`,
-          }).catch(() => {});
-        }
+        // Send to each recipient
+        recipients.forEach((recipient) => {
+          if (prefs.scan_complete) {
+            sendScanCompleteEmail({
+              to: recipient,
+              siteName: resolvedSiteName,
+              siteUrl: url,
+              riskScore: riskResult.score,
+              riskLevel: riskResult.level,
+              totalViolations: scanResult.totalViolations,
+              criticalCount: scanResult.criticalCount,
+              seriousCount: scanResult.seriousCount,
+              dashboardUrl: `${dashboardUrl}/dashboard/sites/${siteId}`,
+            }).catch(() => {});
+          }
 
-        if (riskResult.score >= 70 && prefs.risk_alerts) {
-          sendRiskAlertEmail({
-            to: userEmail,
-            siteName: resolvedSiteName,
-            siteUrl: url,
-            riskScore: riskResult.score,
-            criticalCount: scanResult.criticalCount,
-            seriousCount: scanResult.seriousCount,
-            dashboardUrl: `${dashboardUrl}/dashboard/sites/${siteId}`,
-          }).catch(() => {});
-        }
+          if (riskResult.score >= 70 && prefs.risk_alerts) {
+            sendRiskAlertEmail({
+              to: recipient,
+              siteName: resolvedSiteName,
+              siteUrl: url,
+              riskScore: riskResult.score,
+              criticalCount: scanResult.criticalCount,
+              seriousCount: scanResult.seriousCount,
+              dashboardUrl: `${dashboardUrl}/dashboard/sites/${siteId}`,
+            }).catch(() => {});
+          }
+        });
       }
 
       logger.info('Scan job completed', { jobId: job.id, url, riskScore: riskResult.score });
