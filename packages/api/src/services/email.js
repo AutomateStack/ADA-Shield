@@ -397,7 +397,7 @@ async function sendWeeklySummaryEmail({ to, sites, dashboardUrl }) {
 /**
  * Sends a generic email (used for admin outreach).
  */
-async function sendEmail({ to, subject, text, from = EMAIL_FROM }) {
+async function sendEmail({ to, subject, text, cc, from = EMAIL_FROM }) {
   const resend = getResendClient();
   if (!resend) {
     logger.warn('Resend not configured — skipping email');
@@ -409,25 +409,48 @@ async function sendEmail({ to, subject, text, from = EMAIL_FROM }) {
   const verifiedFrom = getVerifiedFromAddress(from);
 
   try {
-    const { data, error } = await resend.emails.send({
+    const emailPayload = {
       from: verifiedFrom,
       to,
       subject: sanitizedSubject,
       html: `
 <!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
-  <div style="max-width:640px;margin:0 auto;padding:24px 16px;">
-    <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;padding:24px;">
-      <h1 style="font-size:18px;margin:0 0 14px;color:#0f172a;">${sanitizedSubject}</h1>
-      <div style="font-size:15px;line-height:1.7;white-space:pre-wrap;word-wrap:break-word;">${safeText}</div>
-      <p style="margin:20px 0 0;color:#64748b;font-size:12px;">Sent via ADA Shield</p>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${sanitizedSubject}</title>
+  <style>
+    * { margin: 0; padding: 0; }
+    body { background: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #0f172a; }
+    .email-wrapper { background: #f8fafc; width: 100%; padding: 32px 16px; }
+    .email-container { max-width: 640px; margin: 0 auto; }
+    .content-box { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 32px; }
+    .content-box h1 { font-size: 20px; margin: 0 0 16px; color: #0f172a; font-weight: 600; }
+    .content-box p { font-size: 15px; line-height: 1.7; white-space: pre-wrap; word-wrap: break-word; color: #374151; margin: 0 0 16px; }
+    .content-box p:last-of-type { margin-bottom: 0; }
+    .footer { margin-top: 20px; color: #64748b; font-size: 12px; border-top: 1px solid #e2e8f0; padding-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="email-wrapper">
+    <div class="email-container">
+      <div class="content-box">
+        <h1>${sanitizedSubject}</h1>
+        <p>${safeText}</p>
+        <div class="footer">Sent via ADA Shield</div>
+      </div>
     </div>
   </div>
 </body>
 </html>`,
-    });
+    };
+    
+    if (cc && cc.length > 0) {
+      emailPayload.cc = cc;
+    }
+
+    const { data, error } = await resend.emails.send(emailPayload);
 
     if (error) throw error;
     logger.info('Email sent', { to, subject: sanitizedSubject, messageId: data?.id });
@@ -443,4 +466,5 @@ module.exports = {
   sendRiskAlertEmail,
   sendWeeklySummaryEmail,
   sendEmail,
+  getVerifiedFromAddress,
 };
