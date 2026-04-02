@@ -145,7 +145,15 @@ export default function AdminScansPage() {
         .map((value) => value.trim())
         .filter((value) => value.startsWith('http://') || value.startsWith('https://'));
 
-      const merged = [...new Set([...scanInput.split(/[\n,]+/).map((u) => u.trim()).filter(Boolean), ...extracted])];
+      const existing = scanInput
+        .split(/[\n,]+/)
+        .map((u) => u.trim())
+        .filter(Boolean);
+      const mergedMap = {} as Record<string, true>;
+      [...existing, ...extracted].forEach((url) => {
+        mergedMap[url] = true;
+      });
+      const merged = Object.keys(mergedMap);
       setScanInput(merged.join('\n'));
       setScanSummary(`Loaded ${extracted.length} URL(s) from CSV.`);
     } catch {
