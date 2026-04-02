@@ -334,7 +334,7 @@ async function getAdminSites({ page = 1, limit = 20, sortBy = 'created_at', sort
 /**
  * Updates site-level owner metadata from admin panel.
  * @param {string} siteId
- * @param {object} patch - Fields to update (owner_name, owner_email)
+ * @param {object} patch - Fields to update (owner_name, owner_email, notification_recipients)
  */
 async function updateAdminSiteMetadata(siteId, patch) {
   try {
@@ -343,7 +343,7 @@ async function updateAdminSiteMetadata(siteId, patch) {
       .update(patch)
       .eq('id', siteId)
       .select(
-        'id, user_id, url, name, created_at, owner_name, owner_email, contacted_count, last_contacted_at'
+        'id, user_id, url, name, created_at, owner_name, owner_email, notification_recipients, contacted_count, last_contacted_at'
       )
       .single();
 
@@ -363,7 +363,7 @@ async function getSiteById(siteId) {
   try {
     const { data, error } = await supabase
       .from('sites')
-      .select('id, url, name, owner_name, owner_email, user_id, created_at, contacted_count, last_contacted_at')
+      .select('id, url, name, owner_name, owner_email, notification_recipients, user_id, created_at, contacted_count, last_contacted_at')
       .eq('id', siteId)
       .single();
 

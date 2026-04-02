@@ -124,6 +124,20 @@ router.get('/sites', async (req, res, next) => {
 const adminSitePatchSchema = z.object({
   owner_name: z.string().trim().max(120).nullable().optional(),
   owner_email: z.string().trim().email().max(254).nullable().optional(),
+  notification_recipients: z
+    .string()
+    .trim()
+    .optional()
+    .nullable()
+    .transform((val) => {
+      if (!val || val.trim() === '') return [];
+      // Split by comma and validate each email
+      return val
+        .split(',')
+        .map((e) => e.trim())
+        .filter((e) => e.length > 0)
+        .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)); // Basic email validation
+    }),
 });
 
 router.patch('/sites/:siteId', async (req, res, next) => {
@@ -139,7 +153,12 @@ router.patch('/sites/:siteId', async (req, res, next) => {
     const patch = {};
     for (const [key, value] of Object.entries(parsed.data)) {
       if (value === undefined) continue;
-      patch[key] = typeof value === 'string' && value.trim() === '' ? null : value;
+      if (key === 'notification_recipients') {
+        // Store as JSON array
+        patch[key] = value && value.length > 0 ? value : [];
+      } else {
+        patch[key] = typeof value === 'string' && value.trim() === '' ? null : value;
+      }
     }
 
     if (Object.keys(patch).length === 0) {
@@ -364,11 +383,27 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
     let deliveryChannel = 'supabase-function';
     let providerMessageId = null;
 
+    // Collect all recipients: owner email + notification recipients list
+    const allRecipients = new Set();
+    if (site.owner_email) allRecipients.add(site.owner_email);
+    if (site.notification_recipients && Array.isArray(site.notification_recipients)) {
+      site.notification_recipients.forEach((email) => allRecipients.add(email));
+    }
+
+    if (allRecipients.size === 0) {
+      return res.status(400).json({ error: 'No recipient emails configured for this site' });
+    }
+
+    const recipientList = Array.from(allRecipients);
+    const primaryRecipient = recipientList[0];
+    const ccRecipients = recipientList.slice(1);
+
     // Primary path: Supabase Edge Function (Resend)
     // Fallback path: direct API-side sendEmail if function call fails.
     try {
       const response = await invokeSupabaseFunction('send-admin-email', {
-        to: site.owner_email,
+        to: primaryRecipient,
+        cc: ccRecipients.length > 0 ? ccRecipients : undefined,
         subject: parsed.data.subject,
         message: parsed.data.message,
         siteId: site.id,
@@ -379,17 +414,18 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
     } catch (edgeError) {
       logger.warn('Edge function send failed, using local email fallback', {
         siteId: site.id,
-        to: site.owner_email,
+        to: primaryRecipient,
+        cc: ccRecipients,
         error: edgeError.message,
       });
 
       try {
         deliveryChannel = 'api-fallback';
         const fallbackResponse = await sendEmail({
-          to: site.owner_email,
+          to: primaryRecipient,
           subject: parsed.data.subject,
           text: parsed.data.message,
-          cc: ['tthirmal@gmail.com'],
+          cc: ccRecipients,
         });
         providerMessageId = fallbackResponse?.id || null;
       } catch (fallbackError) {
