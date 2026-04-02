@@ -39,6 +39,9 @@ export default function AdminScansPage() {
   const [filter, setFilter] = useState<'all' | 'free' | 'authenticated'>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [scanInput, setScanInput] = useState('');
+  const [scanRunning, setScanRunning] = useState(false);
+  const [scanSummary, setScanSummary] = useState('');
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
   const adminSecret = process.env.NEXT_PUBLIC_ADMIN_SECRET || '';
@@ -71,8 +74,68 @@ export default function AdminScansPage() {
     setPage(1);
   };
 
+  const runAdminScans = async () => {
+    const urls = scanInput
+      .split(/[\n,]+/)
+      .map((u) => u.trim())
+      .filter(Boolean);
+
+    if (urls.length === 0) {
+      setScanSummary('Please enter at least one URL.');
+      return;
+    }
+
+    setScanRunning(true);
+    setScanSummary('');
+    try {
+      const res = await fetch(`${apiUrl}/api/admin/scans/run`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-secret': adminSecret,
+        },
+        body: JSON.stringify({ urls }),
+      });
+
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload.error || 'Failed to run admin scans');
+      }
+
+      setScanSummary(`Completed: ${payload.successCount} success, ${payload.failedCount} failed (requested ${payload.requestedCount}).`);
+      await fetchScans();
+    } catch (err: any) {
+      setScanSummary(err.message || 'Failed to run admin scans');
+    } finally {
+      setScanRunning(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
+        <h2 className="text-sm font-semibold text-white">Run Admin Scans (No Free Limit)</h2>
+        <p className="text-xs text-slate-400">Paste one or more URLs (comma or new line separated). Admin scans are not subject to public free-scan limits.</p>
+        <textarea
+          value={scanInput}
+          onChange={(e) => setScanInput(e.target.value)}
+          rows={4}
+          placeholder={'https://example.com\nhttps://another-site.com'}
+          className="w-full rounded-lg bg-slate-900/70 border border-white/10 text-slate-200 placeholder:text-slate-500 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+        />
+        <div className="flex items-center gap-3">
+          <button
+            onClick={runAdminScans}
+            disabled={scanRunning}
+            className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium text-brand-300 hover:text-white bg-brand-600/10 hover:bg-brand-600/30 border border-brand-500/30 rounded-md transition-colors disabled:opacity-60"
+          >
+            {scanRunning ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Activity className="h-3.5 w-3.5" />}
+            {scanRunning ? 'Scanning...' : 'Run Scans'}
+          </button>
+          {scanSummary && <span className="text-xs text-slate-300">{scanSummary}</span>}
+        </div>
+      </div>
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
