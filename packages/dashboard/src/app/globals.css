@@ -40,6 +40,13 @@
   }
 }
 
+/* Ensure native select dropdown options are readable across OS/browser themes */
+select option,
+select optgroup {
+  color: #0f172a;
+  background-color: #ffffff;
+}
+
 /* Custom scrollbar for dark backgrounds */
 ::-webkit-scrollbar {
   width: 8px;
