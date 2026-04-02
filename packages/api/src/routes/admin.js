@@ -215,6 +215,51 @@ const adminBulkScanSchema = z.object({
     .max(50),
 });
 
+async function runAdminScanForUrl(url) {
+  const scanResult = await scanPage(url);
+  const riskResult = calculateRiskScore(scanResult.violations);
+
+  let siteId = null;
+  try {
+    const freeSite = await createOrUpdateFreeScanSite({
+      url: scanResult.url,
+      ownerName: scanResult.pageMetadata?.companyName,
+      ownerEmail: scanResult.pageMetadata?.contactEmail,
+    });
+    siteId = freeSite?.id || null;
+  } catch (_) {
+    // Best effort site linkage — scan still succeeds.
+  }
+
+  const saved = await saveScanResult({
+    url: scanResult.url,
+    siteId,
+    userId: null,
+    riskScore: riskResult.score,
+    totalViolations: scanResult.totalViolations,
+    criticalCount: scanResult.criticalCount,
+    seriousCount: scanResult.seriousCount,
+    moderateCount: scanResult.moderateCount,
+    minorCount: scanResult.minorCount,
+    violations: scanResult.violations,
+    passedRules: scanResult.passedRules,
+    incompleteRules: scanResult.incompleteRules || 0,
+    scanDurationMs: scanResult.scanDurationMs,
+  });
+
+  if (siteId) {
+    await updateSiteLastScanned(siteId);
+  }
+
+  return {
+    url: scanResult.url,
+    status: 'success',
+    scanId: saved.id,
+    riskScore: riskResult.score,
+    totalViolations: scanResult.totalViolations,
+  };
+}
+
 // ── Admin Bulk Scan (No free-scan limits) ──────────────────────────
 router.post('/scans/run', async (req, res, next) => {
   try {
@@ -228,59 +273,30 @@ router.post('/scans/run', async (req, res, next) => {
 
     const urls = [...new Set(parsed.data.urls.map((u) => u.trim()))];
     const results = [];
+    const concurrency = Math.min(4, urls.length);
+    let nextIndex = 0;
 
-    for (const url of urls) {
-      try {
-        const scanResult = await scanPage(url);
-        const riskResult = calculateRiskScore(scanResult.violations);
+    const worker = async () => {
+      while (true) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        if (currentIndex >= urls.length) break;
 
-        let siteId = null;
+        const url = urls[currentIndex];
         try {
-          const freeSite = await createOrUpdateFreeScanSite({
-            url: scanResult.url,
-            ownerName: scanResult.pageMetadata?.companyName,
-            ownerEmail: scanResult.pageMetadata?.contactEmail,
+          const result = await runAdminScanForUrl(url);
+          results.push(result);
+        } catch (scanError) {
+          results.push({
+            url,
+            status: 'failed',
+            error: scanError.message || 'Scan failed',
           });
-          siteId = freeSite?.id || null;
-        } catch (_) {
-          // Best effort site linkage — scan still succeeds.
         }
-
-        const saved = await saveScanResult({
-          url: scanResult.url,
-          siteId,
-          userId: null,
-          riskScore: riskResult.score,
-          totalViolations: scanResult.totalViolations,
-          criticalCount: scanResult.criticalCount,
-          seriousCount: scanResult.seriousCount,
-          moderateCount: scanResult.moderateCount,
-          minorCount: scanResult.minorCount,
-          violations: scanResult.violations,
-          passedRules: scanResult.passedRules,
-          incompleteRules: scanResult.incompleteRules || 0,
-          scanDurationMs: scanResult.scanDurationMs,
-        });
-
-        if (siteId) {
-          await updateSiteLastScanned(siteId);
-        }
-
-        results.push({
-          url: scanResult.url,
-          status: 'success',
-          scanId: saved.id,
-          riskScore: riskResult.score,
-          totalViolations: scanResult.totalViolations,
-        });
-      } catch (scanError) {
-        results.push({
-          url,
-          status: 'failed',
-          error: scanError.message || 'Scan failed',
-        });
       }
-    }
+    };
+
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
     const successCount = results.filter((r) => r.status === 'success').length;
     const failedCount = results.length - successCount;
