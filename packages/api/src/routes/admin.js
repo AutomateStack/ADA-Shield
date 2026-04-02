@@ -2,6 +2,7 @@ const { Router } = require('express');
 const crypto = require('crypto');
 const { z } = require('zod');
 const { logger } = require('../utils/logger');
+const { scanPage, calculateRiskScore } = require('@ada-shield/scanner');
 const {
   getAdminStats,
   getAdminScans,
@@ -17,6 +18,8 @@ const {
   createSiteContactHistoryEntry,
   getSiteContactHistory,
 } = require('../db/admin');
+const { saveScanResult, updateSiteLastScanned } = require('../db/scans');
+const { createOrUpdateFreeScanSite } = require('../db/sites');
 const { invokeSupabaseFunction } = require('../services/supabase-functions');
 const { sendEmail } = require('../services/email');
 
@@ -197,6 +200,107 @@ const sendEmailSchema = z.object({
   subject: z.string().trim().min(1).max(200),
   message: z.string().trim().min(1).max(5000),
   templateStyle: z.enum(['fear_urgency', 'friendly_educational', 'concise_direct']).optional(),
+});
+
+const adminBulkScanSchema = z.object({
+  urls: z
+    .array(
+      z
+        .string()
+        .trim()
+        .url('Invalid URL')
+        .refine((url) => url.startsWith('http://') || url.startsWith('https://'), 'URL must start with http:// or https://')
+    )
+    .min(1)
+    .max(50),
+});
+
+// ── Admin Bulk Scan (No free-scan limits) ──────────────────────────
+router.post('/scans/run', async (req, res, next) => {
+  try {
+    const parsed = adminBulkScanSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+
+    const urls = [...new Set(parsed.data.urls.map((u) => u.trim()))];
+    const results = [];
+
+    for (const url of urls) {
+      try {
+        const scanResult = await scanPage(url);
+        const riskResult = calculateRiskScore(scanResult.violations);
+
+        let siteId = null;
+        try {
+          const freeSite = await createOrUpdateFreeScanSite({
+            url: scanResult.url,
+            ownerName: scanResult.pageMetadata?.companyName,
+            ownerEmail: scanResult.pageMetadata?.contactEmail,
+          });
+          siteId = freeSite?.id || null;
+        } catch (_) {
+          // Best effort site linkage — scan still succeeds.
+        }
+
+        const saved = await saveScanResult({
+          url: scanResult.url,
+          siteId,
+          userId: null,
+          riskScore: riskResult.score,
+          totalViolations: scanResult.totalViolations,
+          criticalCount: scanResult.criticalCount,
+          seriousCount: scanResult.seriousCount,
+          moderateCount: scanResult.moderateCount,
+          minorCount: scanResult.minorCount,
+          violations: scanResult.violations,
+          passedRules: scanResult.passedRules,
+          incompleteRules: scanResult.incompleteRules || 0,
+          scanDurationMs: scanResult.scanDurationMs,
+        });
+
+        if (siteId) {
+          await updateSiteLastScanned(siteId);
+        }
+
+        results.push({
+          url: scanResult.url,
+          status: 'success',
+          scanId: saved.id,
+          riskScore: riskResult.score,
+          totalViolations: scanResult.totalViolations,
+        });
+      } catch (scanError) {
+        results.push({
+          url,
+          status: 'failed',
+          error: scanError.message || 'Scan failed',
+        });
+      }
+    }
+
+    const successCount = results.filter((r) => r.status === 'success').length;
+    const failedCount = results.length - successCount;
+
+    logger.info('Admin bulk scan completed', {
+      requestedCount: urls.length,
+      successCount,
+      failedCount,
+    });
+
+    return res.json({
+      success: true,
+      requestedCount: urls.length,
+      successCount,
+      failedCount,
+      results,
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 function getEmailSendFailureMessage(rawMessage) {
