@@ -46,7 +46,6 @@ interface SitesResponse {
 interface DraftRow {
   owner_name: string;
   owner_email: string;
-  notification_recipients: string;
 }
 
 interface EmailModal {
@@ -152,8 +151,7 @@ export default function AdminSitesPage() {
       for (const site of payload.sites) {
         nextDrafts[site.id] = {
           owner_name: site.owner_name || '',
-          owner_email: site.owner_email || '',
-          notification_recipients: site.notification_recipients?.join(', ') || '',
+          owner_email: [site.owner_email, ...(site.notification_recipients || [])].filter(Boolean).join(', '),
         };
       }
       setDrafts(nextDrafts);
@@ -175,7 +173,6 @@ export default function AdminSitesPage() {
         ...(prev[siteId] || {
           owner_name: '',
           owner_email: '',
-          notification_recipients: '',
         }),
         [key]: value,
       },
@@ -472,10 +469,9 @@ export default function AdminSitesPage() {
                   const draft = drafts[site.id] || {
                     owner_name: '',
                     owner_email: '',
-                    notification_recipients: '',
                   };
 
-                  const hasRecipients = Boolean(site.owner_email || (site.notification_recipients && site.notification_recipients.length > 0));
+                  const hasRecipients = Boolean(draft.owner_email.trim());
 
                   return (
                     <tr key={site.id} className="hover:bg-white/[0.02] transition-colors align-top">
@@ -516,17 +512,11 @@ export default function AdminSitesPage() {
                           <input
                             value={draft.owner_email}
                             onChange={(e) => updateDraft(site.id, 'owner_email', e.target.value)}
-                            placeholder="Primary email: owner@company.com"
-                            className="w-full px-2.5 py-1.5 rounded-md bg-white/5 border border-white/10 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                          />
-                          <input
-                            value={draft.notification_recipients}
-                            onChange={(e) => updateDraft(site.id, 'notification_recipients', e.target.value)}
-                            placeholder="Extra recipients: a@x.com, b@y.com"
+                            placeholder="Emails (comma-separated): owner@company.com, ops@company.com"
                             className="w-full px-2.5 py-1.5 rounded-md bg-white/5 border border-white/10 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500"
                           />
                           <p className="text-[11px] text-slate-500">
-                            All extra recipients are added as CC. Fixed CC recipients are included automatically.
+                            Add all site emails here separated by commas.
                           </p>
                         </div>
                       </td>
