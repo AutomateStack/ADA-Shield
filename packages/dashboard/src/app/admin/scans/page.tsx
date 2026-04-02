@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
+  Download,
 } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
@@ -33,6 +34,23 @@ interface ScansResponse {
   totalPages: number;
 }
 
+interface AdminBulkScanResult {
+  url: string;
+  status: 'success' | 'failed';
+  scanId?: string;
+  riskScore?: number;
+  totalViolations?: number;
+  error?: string;
+}
+
+interface AdminBulkScanResponse {
+  success: boolean;
+  requestedCount: number;
+  successCount: number;
+  failedCount: number;
+  results: AdminBulkScanResult[];
+}
+
 export default function AdminScansPage() {
   const [data, setData] = useState<ScansResponse | null>(null);
   const [page, setPage] = useState(1);
@@ -42,6 +60,7 @@ export default function AdminScansPage() {
   const [scanInput, setScanInput] = useState('');
   const [scanRunning, setScanRunning] = useState(false);
   const [scanSummary, setScanSummary] = useState('');
+  const [scanResults, setScanResults] = useState<AdminBulkScanResult[]>([]);
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
   const adminSecret = process.env.NEXT_PUBLIC_ADMIN_SECRET || '';
@@ -87,6 +106,7 @@ export default function AdminScansPage() {
 
     setScanRunning(true);
     setScanSummary('');
+    setScanResults([]);
     try {
       const res = await fetch(`${apiUrl}/api/admin/scans/run`, {
         method: 'POST',
@@ -102,7 +122,10 @@ export default function AdminScansPage() {
         throw new Error(payload.error || 'Failed to run admin scans');
       }
 
-      setScanSummary(`Completed: ${payload.successCount} success, ${payload.failedCount} failed (requested ${payload.requestedCount}).`);
+      const typedPayload = payload as AdminBulkScanResponse;
+
+      setScanSummary(`Completed: ${typedPayload.successCount} success, ${typedPayload.failedCount} failed (requested ${typedPayload.requestedCount}).`);
+      setScanResults(typedPayload.results || []);
       await fetchScans();
     } catch (err: any) {
       setScanSummary(err.message || 'Failed to run admin scans');
@@ -111,11 +134,74 @@ export default function AdminScansPage() {
     }
   };
 
+  const handleCsvUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const extracted = text
+        .split(/[\n,;]+/)
+        .map((value) => value.trim())
+        .filter((value) => value.startsWith('http://') || value.startsWith('https://'));
+
+      const merged = [...new Set([...scanInput.split(/[\n,]+/).map((u) => u.trim()).filter(Boolean), ...extracted])];
+      setScanInput(merged.join('\n'));
+      setScanSummary(`Loaded ${extracted.length} URL(s) from CSV.`);
+    } catch {
+      setScanSummary('Failed to parse CSV file.');
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  const downloadScanReportCsv = () => {
+    if (!scanResults.length) return;
+
+    const header = ['url', 'status', 'scan_id', 'risk_score', 'total_violations', 'error'];
+    const rows = scanResults.map((r) => [
+      r.url || '',
+      r.status || '',
+      r.scanId || '',
+      Number.isFinite(r.riskScore) ? String(r.riskScore) : '',
+      Number.isFinite(r.totalViolations) ? String(r.totalViolations) : '',
+      r.error || '',
+    ]);
+
+    const csv = [header, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `admin-scan-report-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-6">
       <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
         <h2 className="text-sm font-semibold text-white">Run Admin Scans (No Free Limit)</h2>
         <p className="text-xs text-slate-400">Paste one or more URLs (comma or new line separated). Admin scans are not subject to public free-scan limits.</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-md transition-colors cursor-pointer">
+            Upload CSV
+            <input type="file" accept=".csv,text/csv" onChange={handleCsvUpload} className="hidden" />
+          </label>
+          <button
+            onClick={downloadScanReportCsv}
+            disabled={!scanResults.length}
+            className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-md transition-colors disabled:opacity-50"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Download Last Run CSV
+          </button>
+        </div>
         <textarea
           value={scanInput}
           onChange={(e) => setScanInput(e.target.value)}
