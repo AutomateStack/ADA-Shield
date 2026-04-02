@@ -34,6 +34,8 @@ interface AdminSite {
   notification_recipients: string[] | null;
   contacted_count: number;
   last_contacted_at: string | null;
+  latest_risk_score: number | null;
+  latest_scanned_at: string | null;
 }
 
 interface SitesResponse {
@@ -44,7 +46,6 @@ interface SitesResponse {
 }
 
 interface DraftRow {
-  owner_name: string;
   owner_email: string;
 }
 
@@ -150,7 +151,6 @@ export default function AdminSitesPage() {
       const nextDrafts: Record<string, DraftRow> = {};
       for (const site of payload.sites) {
         nextDrafts[site.id] = {
-          owner_name: site.owner_name || '',
           owner_email: [site.owner_email, ...(site.notification_recipients || [])].filter(Boolean).join(', '),
         };
       }
@@ -171,7 +171,6 @@ export default function AdminSitesPage() {
       ...prev,
       [siteId]: {
         ...(prev[siteId] || {
-          owner_name: '',
           owner_email: '',
         }),
         [key]: value,
@@ -427,7 +426,7 @@ export default function AdminSitesPage() {
               <tr className="border-b border-white/10 text-left">
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Site</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Status</th>
-                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Owner</th>
+                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Most Recent Risk</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Recipients</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">
                   <button
@@ -467,7 +466,6 @@ export default function AdminSitesPage() {
               ) : (
                 data.sites.map((site) => {
                   const draft = drafts[site.id] || {
-                    owner_name: '',
                     owner_email: '',
                   };
 
@@ -500,12 +498,13 @@ export default function AdminSitesPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3 min-w-[170px]">
-                        <input
-                          value={draft.owner_name}
-                          onChange={(e) => updateDraft(site.id, 'owner_name', e.target.value)}
-                          placeholder="Owner name"
-                          className="w-full px-2.5 py-1.5 rounded-md bg-white/5 border border-white/10 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        />
+                        {typeof site.latest_risk_score === 'number' ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-500/10 text-red-300">
+                            {site.latest_risk_score}/100
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-500">—</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 min-w-[220px]">
                         <div className="space-y-2">
