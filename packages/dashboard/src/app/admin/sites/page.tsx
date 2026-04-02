@@ -25,6 +25,7 @@ interface AdminSite {
   user_id: string | null;
   user_email: string | null;
   is_registered: boolean;
+  type?: string; // 'free' | 'admin' | 'registered'
   url: string;
   name: string | null;
   created_at: string;
@@ -111,6 +112,8 @@ export default function AdminSitesPage() {
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyData, setHistoryData] = useState<ContactHistoryResponse | null>(null);
+  const [filterType, setFilterType] = useState<'all' | 'free' | 'admin' | 'registered'>('all');
+  const [filterContracted, setFilterContracted] = useState<'all' | 'yes' | 'no'>('all');
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
   const adminSecret = process.env.NEXT_PUBLIC_ADMIN_SECRET || '';
@@ -119,8 +122,24 @@ export default function AdminSitesPage() {
     setLoading(true);
     setError('');
     try {
+      const params = new URLSearchParams();
+      params.set('page', String(page));
+      params.set('limit', '20');
+      params.set('sortBy', sortBy);
+      params.set('sortOrder', sortOrder);
+      
+      // Add filters
+      if (filterType !== 'all') {
+        params.set('type', filterType === 'registered' ? 'registered' : filterType);
+      }
+      if (filterContracted === 'yes') {
+        params.set('contracted', 'true');
+      } else if (filterContracted === 'no') {
+        params.set('contracted', 'false');
+      }
+
       const res = await fetch(
-        `${apiUrl}/api/admin/sites?page=${page}&limit=20&sortBy=${sortBy}&sortOrder=${sortOrder}`,
+        `${apiUrl}/api/admin/sites?${params.toString()}`,
         {
         headers: { 'x-admin-secret': adminSecret },
         }
@@ -143,7 +162,7 @@ export default function AdminSitesPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiUrl, adminSecret, page, sortBy, sortOrder]);
+  }, [apiUrl, adminSecret, page, sortBy, sortOrder, filterType, filterContracted]);
 
   useEffect(() => {
     fetchSites();
@@ -313,6 +332,16 @@ export default function AdminSitesPage() {
     }
   };
 
+  const handleFilterTypeChange = (newType: 'all' | 'free' | 'admin' | 'registered') => {
+    setFilterType(newType);
+    setPage(1); // Reset to first page when filter changes
+  };
+
+  const handleFilterContractedChange = (newContracted: 'all' | 'yes' | 'no') => {
+    setFilterContracted(newContracted);
+    setPage(1); // Reset to first page when filter changes
+  };
+
   const onTemplateStyleChange = (style: EmailTemplateStyle) => {
     setEmailModal((prev) => {
       if (!prev) return prev;
@@ -350,6 +379,49 @@ export default function AdminSitesPage() {
           {error}
         </div>
       )}
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3 items-center">
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-medium text-slate-300">Status:</label>
+          <select
+            value={filterType}
+            onChange={(e) => handleFilterTypeChange(e.target.value as any)}
+            className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white hover:bg-white/10 focus:bg-white/10 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          >
+            <option value="all">All</option>
+            <option value="free">Free</option>
+            <option value="admin">Admin</option>
+            <option value="registered">Registered</option>
+          </select>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-medium text-slate-300">Contracted:</label>
+          <select
+            value={filterContracted}
+            onChange={(e) => handleFilterContractedChange(e.target.value as any)}
+            className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white hover:bg-white/10 focus:bg-white/10 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          >
+            <option value="all">All</option>
+            <option value="yes">Contacted</option>
+            <option value="no">Not Contacted</option>
+          </select>
+        </div>
+
+        {(filterType !== 'all' || filterContracted !== 'all') && (
+          <button
+            onClick={() => {
+              setFilterType('all');
+              setFilterContracted('all');
+              setPage(1);
+            }}
+            className="px-3 py-2 text-sm text-slate-300 hover:text-white bg-white/5 border border-white/10 rounded-lg transition-colors"
+          >
+            Clear Filters
+          </button>
+        )}
+      </div>
 
       <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
@@ -417,12 +489,18 @@ export default function AdminSitesPage() {
                       <td className="px-4 py-3 min-w-[110px]">
                         <span
                           className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                            site.is_registered
+                            site.type === 'admin'
+                              ? 'bg-amber-500/10 text-amber-300'
+                              : site.type === 'registered' || site.is_registered
                               ? 'bg-brand-500/10 text-brand-300'
                               : 'bg-slate-500/10 text-slate-300'
                           }`}
                         >
-                          {site.is_registered ? 'Registered' : 'Free Scan'}
+                          {site.type === 'admin'
+                            ? 'Admin'
+                            : site.type === 'registered' || site.is_registered
+                            ? 'Registered'
+                            : 'Free'}
                         </span>
                       </td>
                       <td className="px-4 py-3 min-w-[170px]">

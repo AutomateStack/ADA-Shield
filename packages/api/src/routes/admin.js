@@ -123,8 +123,19 @@ router.get('/sites', async (req, res, next) => {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const sortBy = String(req.query.sortBy || 'created_at');
     const sortOrder = String(req.query.sortOrder || 'desc');
+    
+    // Parse filter parameters
+    let type = undefined;
+    if (req.query.type && ['free', 'admin', 'registered'].includes(String(req.query.type))) {
+      type = String(req.query.type);
+    }
+    
+    let contracted = undefined;
+    if (req.query.contracted !== undefined) {
+      contracted = req.query.contracted === 'true' ? true : req.query.contracted === 'false' ? false : undefined;
+    }
 
-    const result = await getAdminSites({ page, limit, sortBy, sortOrder });
+    const result = await getAdminSites({ page, limit, sortBy, sortOrder, type, contracted });
     return res.json(result);
   } catch (error) {
     next(error);
@@ -226,6 +237,7 @@ async function runAdminScanForUrl(url) {
       url: scanResult.url,
       ownerName: scanResult.pageMetadata?.companyName,
       ownerEmail: scanResult.pageMetadata?.contactEmail,
+      type: 'admin',
     });
     siteId = freeSite?.id || null;
   } catch (_) {
