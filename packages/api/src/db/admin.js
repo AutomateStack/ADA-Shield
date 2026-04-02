@@ -474,7 +474,7 @@ async function getLatestSiteScanSummary(siteId) {
   try {
     const { data, error } = await supabase
       .from('scan_results')
-      .select('id, scanned_at, total_violations, critical_count, serious_count, risk_score')
+      .select('id, scanned_at, total_violations, critical_count, serious_count, risk_score, violations')
       .eq('site_id', siteId)
       .order('scanned_at', { ascending: false })
       .limit(1)

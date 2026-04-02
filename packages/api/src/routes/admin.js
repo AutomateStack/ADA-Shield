@@ -432,7 +432,51 @@ function formatIndustryLabel(industry) {
   return labels[industry] || labels.generic;
 }
 
-function buildEmailTemplates({ firstName, siteName, issueText, riskScore, industry }) {
+function buildTopIssuesSummary(violations, dashboardUrl) {
+  if (!Array.isArray(violations) || violations.length === 0) {
+    return {
+      summaryText: 'No detailed issue breakdown is available from this scan snapshot.',
+      hiddenCount: 0,
+    };
+  }
+
+  const impactPriority = {
+    critical: 4,
+    serious: 3,
+    moderate: 2,
+    minor: 1,
+  };
+
+  const sorted = [...violations].sort((a, b) => {
+    const aScore = impactPriority[a?.impact] || 0;
+    const bScore = impactPriority[b?.impact] || 0;
+    return bScore - aScore;
+  });
+
+  const topTwo = sorted.slice(0, 2);
+  const hiddenCount = Math.max(0, sorted.length - topTwo.length);
+
+  const lines = topTwo.map((issue, index) => {
+    const title = issue?.help || issue?.id || 'Accessibility issue';
+    const quickFixRaw = issue?.affectedElements?.[0]?.actionRequired
+      || issue?.affectedElements?.[0]?.explanation
+      || 'Apply WCAG 2.1 AA fix guidance for this issue.';
+    const quickFix = String(quickFixRaw).split('. ')[0].trim();
+
+    return `${index + 1}. ${title}\n   Quick fix: ${quickFix}${quickFix.endsWith('.') ? '' : '.'}`;
+  });
+
+  const loginLine = hiddenCount > 0
+    ? `\nTo see the other ${hiddenCount} issue(s) and full fixes, please login for free: ${dashboardUrl}`
+    : '';
+
+  return {
+    summaryText: `${lines.join('\n\n')}${loginLine}`,
+    hiddenCount,
+  };
+}
+
+function buildEmailTemplates({ firstName, siteName, issueText, riskScore, industry, topIssuesSummary }) {
   const dashboardUrl = 'https://ada-shield-dashboard.vercel.app';
   const supportLine = 'If you have any questions, you can reach me at tthirmal@gmail.com.';
   const riskScoreText = Number.isFinite(riskScore) ? `${riskScore}/100` : 'elevated';
@@ -448,6 +492,9 @@ I ran an ADA accessibility check for ${siteName} and found ${issueText} issues t
 
 Risk signal: ${riskScoreText}
 ${yearlyStats}
+
+Top 2 issues found (simple):
+${topIssuesSummary}
 
 Why this matters:
 ${riskContext}
@@ -474,6 +521,9 @@ I reviewed ${siteName} and found ${issueText} accessibility items worth fixing.
 
 ${yearlyStats}
 
+Top 2 issues found (simple):
+${topIssuesSummary}
+
 Accessibility improvements help reduce legal exposure and improve user experience for all visitors.
 
 Context:
@@ -498,6 +548,9 @@ I scanned ${siteName} and found ${issueText} ADA-related issues.
 
 Risk signal: ${riskScoreText}
 ${yearlyStats}
+
+Top 2 issues found (simple):
+${topIssuesSummary}
 
 Why this matters:
 ${riskContext}
@@ -532,12 +585,15 @@ router.get('/sites/:siteId/email-template', async (req, res, next) => {
       : 0;
     const issueText = issueCount > 0 ? String(issueCount) : 'multiple';
     const industry = detectIndustry(site.url);
+    const dashboardUrl = 'https://ada-shield-dashboard.vercel.app';
+    const { summaryText: topIssuesSummary } = buildTopIssuesSummary(latestScan?.violations || [], dashboardUrl);
     const templates = buildEmailTemplates({
       firstName,
       siteName,
       issueText,
       riskScore: latestScan?.risk_score,
       industry,
+      topIssuesSummary,
     });
 
     const defaultStyle = pickDefaultTemplateStyle(latestScan?.risk_score);
