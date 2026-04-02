@@ -223,12 +223,27 @@ const adminBulkScanSchema = z.object({
       z
         .string()
         .trim()
-        .url('Invalid URL')
-        .refine((url) => url.startsWith('http://') || url.startsWith('https://'), 'URL must start with http:// or https://')
+        .min(1, 'URL is required')
     )
     .min(1)
     .max(50),
 });
+
+function normalizeScanUrl(input) {
+  const value = String(input || '').trim();
+  if (!value) return null;
+
+  // Auto-prefix plain domains like "google.com" with https
+  const withProtocol = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+
+  try {
+    const parsed = new URL(withProtocol);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return null;
+    return parsed.toString();
+  } catch (_) {
+    return null;
+  }
+}
 
 async function runAdminScanForUrl(url) {
   const scanResult = await scanPage(url);
@@ -293,7 +308,26 @@ router.post('/scans/run', async (req, res, next) => {
       });
     }
 
-    const urls = [...new Set(parsed.data.urls.map((u) => u.trim()))];
+    const normalized = parsed.data.urls
+      .map((u) => ({ raw: u, normalized: normalizeScanUrl(u) }))
+      .filter((item) => item.normalized);
+
+    if (normalized.length === 0) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: { urls: ['Provide at least one valid URL or domain (e.g., google.com or https://google.com)'] },
+      });
+    }
+
+    const invalidRaw = parsed.data.urls.filter((u) => !normalizeScanUrl(u));
+    if (invalidRaw.length > 0) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: { urls: [`Invalid URL(s): ${invalidRaw.join(', ')}`] },
+      });
+    }
+
+    const urls = [...new Set(normalized.map((item) => item.normalized))];
     const results = [];
     const concurrency = Math.min(4, urls.length);
     let nextIndex = 0;

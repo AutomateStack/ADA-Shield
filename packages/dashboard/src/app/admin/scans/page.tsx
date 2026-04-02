@@ -100,7 +100,7 @@ export default function AdminScansPage() {
 
   const runAdminScans = async () => {
     const urls = scanInput
-      .split(/[\n,]+/)
+      .split(/[\n,;]+/)
       .map((u) => u.trim())
       .filter(Boolean);
 
@@ -148,7 +148,7 @@ export default function AdminScansPage() {
       const extracted = text
         .split(/[\n,;]+/)
         .map((value) => value.trim())
-        .filter((value) => value.startsWith('http://') || value.startsWith('https://'));
+        .filter(Boolean);
 
       const existing = scanInput
         .split(/[\n,]+/)
@@ -160,7 +160,7 @@ export default function AdminScansPage() {
       });
       const merged = Object.keys(mergedMap);
       setScanInput(merged.join('\n'));
-      setScanSummary(`Loaded ${extracted.length} URL(s) from CSV.`);
+      setScanSummary(`Loaded ${extracted.length} URL/domain value(s) from CSV.`);
     } catch {
       setScanSummary('Failed to parse CSV file.');
     } finally {
@@ -205,7 +205,7 @@ export default function AdminScansPage() {
     <div className="space-y-6">
       <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
         <h2 className="text-sm font-semibold text-white">Run Admin Scans (No Free Limit)</h2>
-        <p className="text-xs text-slate-400">Paste one or more URLs (comma or new line separated). Admin scans are not subject to public free-scan limits.</p>
+        <p className="text-xs text-slate-400">Paste one or more URLs/domains (comma, semicolon, or new line separated). Example: google.com or https://google.com. Admin scans are not subject to public free-scan limits.</p>
         <div className="flex flex-wrap items-center gap-2">
           <label className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-md transition-colors cursor-pointer">
             Upload CSV
@@ -224,7 +224,7 @@ export default function AdminScansPage() {
           value={scanInput}
           onChange={(e) => setScanInput(e.target.value)}
           rows={4}
-          placeholder={'https://example.com\nhttps://another-site.com'}
+          placeholder={'google.com\nhttps://another-site.com'}
           className="w-full rounded-lg bg-slate-900/70 border border-white/10 text-slate-200 placeholder:text-slate-500 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
         />
         <div className="flex items-center gap-3">
