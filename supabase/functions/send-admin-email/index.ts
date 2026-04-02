@@ -7,7 +7,7 @@ const corsHeaders = {
 };
 
 type SendAdminEmailPayload = {
-  to?: string;
+  to?: string | string[];
   cc?: string[];
   subject?: string;
   message?: string;
@@ -15,6 +15,23 @@ type SendAdminEmailPayload = {
   siteName?: string | null;
   siteUrl?: string | null;
 };
+
+function normalizeEmailList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((email) => String(email || '').trim())
+      .filter((email) => email.length > 0);
+  }
+
+  if (typeof value === 'string') {
+    return value
+      .split(/[;,\n]+/)
+      .map((email) => email.trim())
+      .filter((email) => email.length > 0);
+  }
+
+  return [];
+}
 
 function jsonResponse(status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
@@ -92,13 +109,13 @@ Deno.serve(async (req) => {
     return jsonResponse(400, { error: 'Invalid JSON body' });
   }
 
-  const to = String(payload.to || '').trim();
+  const toList = normalizeEmailList(payload.to);
   const subject = sanitizeSubject(payload.subject);
   const message = String(payload.message || '').trim();
   const siteName = escapeHtml(payload.siteName || 'your website');
   const siteUrl = escapeHtml(payload.siteUrl || '');
 
-  if (!to || !subject || !message) {
+  if (toList.length === 0 || !subject || !message) {
     return jsonResponse(400, { error: 'to, subject, and message are required' });
   }
 
@@ -107,7 +124,7 @@ Deno.serve(async (req) => {
   try {
     const emailPayload: any = {
       from,
-      to,
+      to: toList,
       subject,
       html: `
 <!DOCTYPE html>
@@ -163,6 +180,7 @@ Deno.serve(async (req) => {
       success: true,
       messageId: data?.id || null,
       from,
+      recipientCount: toList.length,
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Failed to send email';

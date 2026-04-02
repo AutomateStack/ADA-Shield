@@ -151,7 +151,7 @@ function parseEmailList(value) {
   if (!value || typeof value !== 'string') return [];
 
   return value
-    .split(',')
+    .split(/[;,\n]+/)
     .map((email) => email.trim())
     .filter(Boolean);
 }
@@ -602,7 +602,7 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
 
     // Fixed admin CC (only thermal for monitoring)
     const ccRecipients = FIXED_ADMIN_CC_RECIPIENTS;
-    const toList = Array.from(toRecipients).join(',');
+    const toList = Array.from(toRecipients);
 
     // Primary path: Supabase Edge Function (Resend)
     // Fallback path: direct API-side sendEmail if function call fails.
@@ -620,7 +620,7 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
     } catch (edgeError) {
       logger.warn('Edge function send failed, using local email fallback', {
         siteId: site.id,
-        to: toList,
+        to: toList.join(','),
         cc: ccRecipients,
         error: edgeError.message,
       });
@@ -641,7 +641,7 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
         return res.status(400).json({
           error: userMessage,
           details: providerMessage,
-             recipient: toList,
+             recipient: toList.join(','),
         });
       }
     }
