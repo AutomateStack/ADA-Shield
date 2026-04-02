@@ -8,6 +8,7 @@ const corsHeaders = {
 
 type SendAdminEmailPayload = {
   to?: string;
+  cc?: string[];
   subject?: string;
   message?: string;
   siteId?: string;
@@ -108,7 +109,6 @@ Deno.serve(async (req) => {
       from,
       to,
       subject,
-      cc: ['tthirmal@gmail.com'],
       html: `
 <!DOCTYPE html>
 <html lang="en">
@@ -147,6 +147,11 @@ Deno.serve(async (req) => {
 </body>
 </html>`,
     };
+
+    // Add CC if provided
+    if (payload.cc && Array.isArray(payload.cc) && payload.cc.length > 0) {
+      emailPayload.cc = payload.cc.filter((email: string) => email && String(email).trim().length > 0).map((email: string) => String(email).trim());
+    }
 
     const { data, error } = await resend.emails.send(emailPayload);
 
