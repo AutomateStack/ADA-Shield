@@ -314,8 +314,30 @@ async function getAdminSites({ page = 1, limit = 20, sortBy = 'created_at', sort
     if (error) throw error;
 
     const sites = data || [];
+    const siteIds = sites.map((s) => s.id).filter(Boolean);
     const authenticatedUserIds = [...new Set(sites.map((s) => s.user_id).filter(Boolean))];
     let emailMap = {};
+    const latestRiskBySiteId = {};
+    const latestScannedAtBySiteId = {};
+
+    if (siteIds.length > 0) {
+      const { data: siteScans, error: scansError } = await supabase
+        .from('scan_results')
+        .select('site_id, risk_score, scanned_at')
+        .in('site_id', siteIds)
+        .order('scanned_at', { ascending: false });
+
+      if (scansError) {
+        logger.warn('Could not fetch latest scan risk for admin sites view', { error: scansError.message });
+      } else {
+        for (const scan of siteScans || []) {
+          if (!latestRiskBySiteId[scan.site_id]) {
+            latestRiskBySiteId[scan.site_id] = scan.risk_score;
+            latestScannedAtBySiteId[scan.site_id] = scan.scanned_at;
+          }
+        }
+      }
+    }
 
     if (authenticatedUserIds.length > 0) {
       const { data: profiles, error: profilesError } = await supabase
@@ -336,6 +358,10 @@ async function getAdminSites({ page = 1, limit = 20, sortBy = 'created_at', sort
         ...site,
         user_email: site.user_id ? emailMap[site.user_id] || null : null,
         is_registered: !!site.user_id,
+        latest_risk_score: Object.prototype.hasOwnProperty.call(latestRiskBySiteId, site.id)
+          ? latestRiskBySiteId[site.id]
+          : null,
+        latest_scanned_at: latestScannedAtBySiteId[site.id] || null,
       })),
       total: count || 0,
       page,
