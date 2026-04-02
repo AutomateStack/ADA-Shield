@@ -21,7 +21,7 @@ const {
 const { saveScanResult, updateSiteLastScanned } = require('../db/scans');
 const { createOrUpdateFreeScanSite } = require('../db/sites');
 const { invokeSupabaseFunction } = require('../services/supabase-functions');
-const { sendEmail } = require('../services/email');
+const { sendEmail, detectIndustry, getIndustryContext } = require('../services/email');
 
 const router = Router();
 
@@ -218,6 +218,7 @@ const adminBulkScanSchema = z.object({
 async function runAdminScanForUrl(url) {
   const scanResult = await scanPage(url);
   const riskResult = calculateRiskScore(scanResult.violations);
+  const industry = detectIndustry(scanResult.url);
 
   let siteId = null;
   try {
@@ -257,6 +258,11 @@ async function runAdminScanForUrl(url) {
     scanId: saved.id,
     riskScore: riskResult.score,
     totalViolations: scanResult.totalViolations,
+    industry,
+    companyName: scanResult.pageMetadata?.companyName || null,
+    contactEmail: scanResult.pageMetadata?.contactEmail || null,
+    supportEmail: scanResult.pageMetadata?.supportEmail || null,
+    allEmails: Array.isArray(scanResult.pageMetadata?.allEmails) ? scanResult.pageMetadata.allEmails : [],
   };
 }
 
@@ -378,66 +384,94 @@ function pickDefaultTemplateStyle(riskScore) {
   return 'friendly_educational';
 }
 
-function buildEmailTemplates({ firstName, restaurantName, city, issueText }) {
+function formatIndustryLabel(industry) {
+  const labels = {
+    restaurant: 'Restaurant / Food Service',
+    insurance: 'Insurance',
+    healthcare: 'Healthcare',
+    finance: 'Finance',
+    ecommerce: 'E-commerce',
+    education: 'Education',
+    tech: 'Technology',
+    government: 'Government / Public Sector',
+    manufacturing: 'Manufacturing',
+    generic: 'General Business',
+  };
+  return labels[industry] || labels.generic;
+}
+
+function buildEmailTemplates({ firstName, siteName, issueText, riskScore, industry }) {
   const dashboardUrl = 'https://ada-shield-dashboard.vercel.app';
   const supportLine = 'If you have any questions, you can reach me at tthirmal@gmail.com.';
+  const industryLabel = formatIndustryLabel(industry);
+  const { riskContext, callSignal } = getIndustryContext(industry);
+  const riskScoreText = Number.isFinite(riskScore) ? `${riskScore}/100` : 'elevated';
 
   const templates = {
     fear_urgency: {
-      subject: `[noreplay] Is ${restaurantName} protected from ADA lawsuits?`,
+      subject: `[noreply] ${siteName}: accessibility risk alert`,
       message: `Hi ${firstName},
 
-Quick question - has anyone ever mentioned ADA website compliance to you?
+I ran an ADA accessibility check for ${siteName} and found ${issueText} issues that can increase legal risk.
 
-I ask because I've been scanning restaurant websites in ${city} this week, and ${restaurantName} came up with ${issueText} violations that match what plaintiff lawyers specifically look for.
-
-The restaurant industry is one of the top 5 most targeted industries for ADA web lawsuits. The average settlement is $5,000-$25,000, and that is before legal fees.
-
-I built a tool that gives you a 0-100 lawsuit risk score and shows the exact code to fix every issue. It takes 30 seconds to check.
-
-Free scan here: ${dashboardUrl}
-
-Worth checking before a lawyer does it for you.
-
-${supportLine}
-
-Thirmal
-ADA Shield
-${dashboardUrl}`,
-    },
-    friendly_educational: {
-  subject: `[noreplay] Quick ADA check for ${restaurantName}`,
-      message: `Hi ${firstName},
-
-I hope you are doing well. I ran a quick accessibility check for ${restaurantName} and found ${issueText} items worth fixing.
-
-These are common issues restaurants usually miss, like contrast, missing labels, and image alt text. They can affect both user experience and ADA compliance risk.
-
-I built ADA Shield to make this easy: you get a 0-100 lawsuit risk score and exact code-level fixes in about 30 seconds.
-
-Run your free scan here: ${dashboardUrl}
-
-If you want, I can also share the top 2 priority fixes first.
-
-${supportLine}
-
-Thirmal
-ADA Shield
-${dashboardUrl}`,
-    },
-    concise_direct: {
-  subject: `[noreplay] ${restaurantName}: ADA risk snapshot`,
-      message: `Hi ${firstName},
-
-I scanned ${restaurantName} and found ${issueText} ADA-related web issues.
+Industry profile: ${industryLabel}
+Risk signal: ${riskScoreText}
 
 Why this matters:
-- Restaurants are a frequent ADA lawsuit target
-- Typical settlements can be costly before legal fees
+${riskContext}
+
+Recommended action:
+${callSignal}
 
 ADA Shield gives you:
 - 0-100 lawsuit risk score
 - Exact fix suggestions for each issue
+
+Run a fresh scan: ${dashboardUrl}
+
+${supportLine}
+
+Thirmal
+ADA Shield`,
+    },
+    friendly_educational: {
+      subject: `[noreply] Quick accessibility snapshot for ${siteName}`,
+      message: `Hi ${firstName},
+
+I reviewed ${siteName} and found ${issueText} accessibility items worth fixing.
+
+Industry profile: ${industryLabel}
+
+Accessibility improvements help reduce legal exposure and improve user experience for all visitors.
+
+Context for your industry:
+${riskContext}
+
+ADA Shield can help with:
+- 0-100 risk scoring
+- Prioritized, code-level fixes
+
+Run your scan here: ${dashboardUrl}
+
+${supportLine}
+
+Thirmal
+ADA Shield`,
+    },
+    concise_direct: {
+      subject: `[noreply] ${siteName}: ADA risk snapshot`,
+      message: `Hi ${firstName},
+
+I scanned ${siteName} and found ${issueText} ADA-related issues.
+
+Industry: ${industryLabel}
+Risk signal: ${riskScoreText}
+
+Why this matters:
+${riskContext}
+
+Next step:
+${callSignal}
 
 Free scan: ${dashboardUrl}
 
@@ -460,17 +494,18 @@ router.get('/sites/:siteId/email-template', async (req, res, next) => {
 
     const latestScan = await getLatestSiteScanSummary(req.params.siteId);
     const firstName = extractFirstName(site.owner_name);
-    const restaurantName = site.name || site.url;
-    const city = inferCityFromUrl(site.url);
+    const siteName = site.name || site.url;
     const issueCount = Number.isFinite(latestScan?.total_violations)
       ? latestScan.total_violations
       : 0;
     const issueText = issueCount > 0 ? String(issueCount) : 'multiple';
+    const industry = detectIndustry(site.url);
     const templates = buildEmailTemplates({
       firstName,
-      restaurantName,
-      city,
+      siteName,
       issueText,
+      riskScore: latestScan?.risk_score,
+      industry,
     });
 
     const defaultStyle = pickDefaultTemplateStyle(latestScan?.risk_score);
@@ -491,8 +526,9 @@ router.get('/sites/:siteId/email-template', async (req, res, next) => {
       message: selectedTemplate.message,
       dynamic: {
         firstName,
-        restaurantName,
-        city,
+        siteName,
+        industry,
+        industryLabel: formatIndustryLabel(industry),
         issueCount: issueCount > 0 ? issueCount : null,
         riskScore: latestScan?.risk_score ?? null,
       },

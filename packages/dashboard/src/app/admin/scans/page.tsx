@@ -40,6 +40,11 @@ interface AdminBulkScanResult {
   scanId?: string;
   riskScore?: number;
   totalViolations?: number;
+  industry?: string;
+  companyName?: string | null;
+  contactEmail?: string | null;
+  supportEmail?: string | null;
+  allEmails?: string[];
   error?: string;
 }
 
@@ -166,10 +171,15 @@ export default function AdminScansPage() {
   const downloadScanReportCsv = () => {
     if (!scanResults.length) return;
 
-    const header = ['url', 'status', 'scan_id', 'risk_score', 'total_violations', 'error'];
+    const header = ['url', 'status', 'industry', 'company_name', 'contact_email', 'support_email', 'all_emails', 'scan_id', 'risk_score', 'total_violations', 'error'];
     const rows = scanResults.map((r) => [
       r.url || '',
       r.status || '',
+      r.industry || '',
+      r.companyName || '',
+      r.contactEmail || '',
+      r.supportEmail || '',
+      Array.isArray(r.allEmails) ? r.allEmails.join('; ') : '',
       r.scanId || '',
       Number.isFinite(r.riskScore) ? String(r.riskScore) : '',
       Number.isFinite(r.totalViolations) ? String(r.totalViolations) : '',
@@ -228,6 +238,31 @@ export default function AdminScansPage() {
           </button>
           {scanSummary && <span className="text-xs text-slate-300">{scanSummary}</span>}
         </div>
+
+        {scanResults.length > 0 && (
+          <div className="mt-2 overflow-x-auto border border-white/10 rounded-lg">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-white/5 text-slate-400">
+                  <th className="px-3 py-2 text-left">URL</th>
+                  <th className="px-3 py-2 text-left">Industry</th>
+                  <th className="px-3 py-2 text-left">Emails Found</th>
+                  <th className="px-3 py-2 text-left">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scanResults.slice(0, 15).map((r, idx) => (
+                  <tr key={`${r.url}-${idx}`} className="border-t border-white/5 text-slate-300">
+                    <td className="px-3 py-2 max-w-[280px] truncate" title={r.url}>{r.url}</td>
+                    <td className="px-3 py-2">{r.industry || 'generic'}</td>
+                    <td className="px-3 py-2">{Array.isArray(r.allEmails) && r.allEmails.length > 0 ? r.allEmails.join(', ') : '—'}</td>
+                    <td className="px-3 py-2">{r.status === 'success' ? 'success' : (r.error || 'failed')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Header */}

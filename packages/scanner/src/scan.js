@@ -127,31 +127,65 @@ async function extractPageMetadata(page) {
         contactEmail: null,
         supportEmail: null,
         footerText: null,
+        allEmails: [],
       };
 
-      // Try to extract company name from various meta tags
-      const ogNameMeta = document.querySelector('meta[property="og:site_name"]');
-      if (ogNameMeta) result.companyName = ogNameMeta.getAttribute('content');
+      const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 
-      // Look for contact email in footer or contact page
+      // Try to extract company name from common metadata tags.
+      const ogNameMeta = document.querySelector('meta[property="og:site_name"]');
+      const appNameMeta = document.querySelector('meta[name="application-name"]');
+      if (ogNameMeta?.getAttribute('content')) {
+        result.companyName = ogNameMeta.getAttribute('content');
+      } else if (appNameMeta?.getAttribute('content')) {
+        result.companyName = appNameMeta.getAttribute('content');
+      }
+
+      const emailSet = new Set();
+
+      // 1) Collect explicit mailto links first (usually highest quality).
+      document.querySelectorAll('a[href^="mailto:"]').forEach((a) => {
+        const href = a.getAttribute('href') || '';
+        const candidate = href.replace(/^mailto:/i, '').split('?')[0].trim();
+        if (candidate) emailSet.add(candidate.toLowerCase());
+      });
+
+      // 2) Collect from footer text.
       const footer = document.querySelector('footer');
       if (footer) {
         const footerText = footer.innerText || '';
-        result.footerText = footerText.substring(0, 200);
-
-        // Extract emails from footer: look for common patterns
-        const emailMatch = footerText.match(/[\w.-]+@[\w.-]+\.\w+/g);
-        if (emailMatch) {
-          result.contactEmail = emailMatch[0];
-          // If multiple emails, second might be support
-          if (emailMatch.length > 1) result.supportEmail = emailMatch[1];
-        }
+        result.footerText = footerText.substring(0, 300);
+        const footerMatches = footerText.match(EMAIL_REGEX) || [];
+        footerMatches.forEach((e) => emailSet.add(e.toLowerCase()));
       }
 
-      // Fallback: search entire page for company name in h1 or headers
+      // 3) Collect from full page text as a fallback.
+      const bodyText = document.body?.innerText || '';
+      const bodyMatches = bodyText.match(EMAIL_REGEX) || [];
+      bodyMatches.forEach((e) => emailSet.add(e.toLowerCase()));
+
+      // Basic cleanup of false positives / noisy emails.
+      const blocked = new Set(['example.com', 'domain.com', 'email.com']);
+      const allEmails = Array.from(emailSet)
+        .map((e) => e.trim())
+        .filter((e) => e.includes('@'))
+        .filter((e) => {
+          const domain = e.split('@')[1] || '';
+          return domain && !blocked.has(domain);
+        });
+
+      result.allEmails = allEmails;
+      if (allEmails.length > 0) {
+        result.contactEmail = allEmails[0];
+      }
+      if (allEmails.length > 1) {
+        result.supportEmail = allEmails[1];
+      }
+
+      // Fallback: search entire page for company name in h1.
       const h1 = document.querySelector('h1');
       if (h1 && !result.companyName) {
-        result.companyName = h1.innerText || null;
+        result.companyName = (h1.innerText || '').trim() || null;
       }
 
       return result;
