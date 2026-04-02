@@ -288,7 +288,7 @@ async function getAdminSites({ page = 1, limit = 20, sortBy = 'created_at', sort
     const { data, error, count } = await supabase
       .from('sites')
       .select(
-        'id, user_id, url, name, created_at, owner_name, owner_email, contacted_count, last_contacted_at',
+        'id, user_id, url, name, created_at, owner_name, owner_email, notification_recipients, contacted_count, last_contacted_at',
         { count: 'exact' }
       )
       .order(normalizedSortBy, { ascending: normalizedSortOrder === 'asc', nullsFirst: normalizedSortOrder !== 'asc' })

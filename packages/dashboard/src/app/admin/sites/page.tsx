@@ -30,6 +30,7 @@ interface AdminSite {
   created_at: string;
   owner_name: string | null;
   owner_email: string | null;
+  notification_recipients: string[] | null;
   contacted_count: number;
   last_contacted_at: string | null;
 }
@@ -44,12 +45,13 @@ interface SitesResponse {
 interface DraftRow {
   owner_name: string;
   owner_email: string;
+  notification_recipients: string;
 }
 
 interface EmailModal {
   siteId: string;
   siteName: string;
-  ownerEmail: string;
+  recipientSummary: string;
   selectedStyle: EmailTemplateStyle;
   defaultStyle: EmailTemplateStyle;
   styleOptions: Array<{ key: EmailTemplateStyle; label: string }>;
@@ -132,6 +134,7 @@ export default function AdminSitesPage() {
         nextDrafts[site.id] = {
           owner_name: site.owner_name || '',
           owner_email: site.owner_email || '',
+          notification_recipients: site.notification_recipients?.join(', ') || '',
         };
       }
       setDrafts(nextDrafts);
@@ -153,6 +156,7 @@ export default function AdminSitesPage() {
         ...(prev[siteId] || {
           owner_name: '',
           owner_email: '',
+          notification_recipients: '',
         }),
         [key]: value,
       },
@@ -189,7 +193,7 @@ export default function AdminSitesPage() {
     setEmailModal({
       siteId: site.id,
       siteName: site.name || 'Unnamed site',
-      ownerEmail: site.owner_email || '',
+      recipientSummary: [site.owner_email, ...(site.notification_recipients || [])].filter(Boolean).join(', '),
       selectedStyle: 'fear_urgency',
       defaultStyle: 'fear_urgency',
       styleOptions: [
@@ -355,7 +359,7 @@ export default function AdminSitesPage() {
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Site</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Status</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Owner</th>
-                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Owner Email</th>
+                <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Recipients</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">
                   <button
                     onClick={() => toggleSort('contacted_count')}
@@ -396,7 +400,10 @@ export default function AdminSitesPage() {
                   const draft = drafts[site.id] || {
                     owner_name: '',
                     owner_email: '',
+                    notification_recipients: '',
                   };
+
+                  const hasRecipients = Boolean(site.owner_email || (site.notification_recipients && site.notification_recipients.length > 0));
 
                   return (
                     <tr key={site.id} className="hover:bg-white/[0.02] transition-colors align-top">
@@ -427,12 +434,23 @@ export default function AdminSitesPage() {
                         />
                       </td>
                       <td className="px-4 py-3 min-w-[220px]">
-                        <input
-                          value={draft.owner_email}
-                          onChange={(e) => updateDraft(site.id, 'owner_email', e.target.value)}
-                          placeholder="owner@company.com"
-                          className="w-full px-2.5 py-1.5 rounded-md bg-white/5 border border-white/10 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        />
+                        <div className="space-y-2">
+                          <input
+                            value={draft.owner_email}
+                            onChange={(e) => updateDraft(site.id, 'owner_email', e.target.value)}
+                            placeholder="Primary email: owner@company.com"
+                            className="w-full px-2.5 py-1.5 rounded-md bg-white/5 border border-white/10 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                          />
+                          <input
+                            value={draft.notification_recipients}
+                            onChange={(e) => updateDraft(site.id, 'notification_recipients', e.target.value)}
+                            placeholder="Extra recipients: a@x.com, b@y.com"
+                            className="w-full px-2.5 py-1.5 rounded-md bg-white/5 border border-white/10 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                          />
+                          <p className="text-[11px] text-slate-500">
+                            All extra recipients are added as CC. Fixed CC recipients are included automatically.
+                          </p>
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-center">
                         <button
@@ -450,9 +468,9 @@ export default function AdminSitesPage() {
                       <td className="px-4 py-3 text-right whitespace-nowrap space-x-2">
                         <button
                           onClick={() => openEmailModal(site)}
-                          disabled={!site.owner_email}
+                          disabled={!hasRecipients}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white disabled:text-slate-600 disabled:cursor-not-allowed bg-slate-600/10 hover:bg-slate-600/30 border border-slate-500/30 rounded-md transition-colors disabled:opacity-50"
-                          title={!site.owner_email ? 'Owner email required' : ''}
+                          title={!hasRecipients ? 'At least one recipient is required' : ''}
                         >
                           <Send className="h-3.5 w-3.5" />
                           Email
@@ -510,7 +528,7 @@ export default function AdminSitesPage() {
             <div className="flex items-center justify-between p-6 border-b border-white/10">
               <div>
                 <h2 className="text-lg font-bold text-white">Send Email to {emailModal.siteName}</h2>
-                <p className="text-sm text-slate-400 mt-1">{emailModal.ownerEmail}</p>
+                <p className="text-sm text-slate-400 mt-1 break-all">{emailModal.recipientSummary}</p>
               </div>
               <button
                 onClick={() => setEmailModal(null)}

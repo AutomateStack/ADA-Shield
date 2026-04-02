@@ -22,6 +22,13 @@ const { sendEmail } = require('../services/email');
 
 const router = Router();
 
+const FIXED_ADMIN_CC_RECIPIENTS = [
+  'info@cedaroakinsurance.com',
+  'security.support@prowritersins.com',
+];
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 /**
  * Admin auth middleware — validates INTERNAL_API_SECRET header.
  * Uses timing-safe comparison to prevent timing attacks.
@@ -123,22 +130,18 @@ router.get('/sites', async (req, res, next) => {
 
 const adminSitePatchSchema = z.object({
   owner_name: z.string().trim().max(120).nullable().optional(),
-  owner_email: z.string().trim().email().max(254).nullable().optional(),
-  notification_recipients: z
-    .string()
-    .trim()
-    .optional()
-    .nullable()
-    .transform((val) => {
-      if (!val || val.trim() === '') return [];
-      // Split by comma and validate each email
-      return val
-        .split(',')
-        .map((e) => e.trim())
-        .filter((e) => e.length > 0)
-        .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)); // Basic email validation
-    }),
+  owner_email: z.string().trim().max(1000).nullable().optional(),
+  notification_recipients: z.string().trim().max(4000).optional().nullable(),
 });
+
+function parseEmailList(value) {
+  if (!value || typeof value !== 'string') return [];
+
+  return value
+    .split(',')
+    .map((email) => email.trim())
+    .filter(Boolean);
+}
 
 router.patch('/sites/:siteId', async (req, res, next) => {
   try {
@@ -151,14 +154,32 @@ router.patch('/sites/:siteId', async (req, res, next) => {
     }
 
     const patch = {};
-    for (const [key, value] of Object.entries(parsed.data)) {
-      if (value === undefined) continue;
-      if (key === 'notification_recipients') {
-        // Store as JSON array
-        patch[key] = value && value.length > 0 ? value : [];
-      } else {
-        patch[key] = typeof value === 'string' && value.trim() === '' ? null : value;
-      }
+    const ownerEmails = parseEmailList(parsed.data.owner_email);
+    const extraEmails = parseEmailList(parsed.data.notification_recipients);
+    const invalidEmails = [...ownerEmails, ...extraEmails].filter((email) => !EMAIL_REGEX.test(email));
+
+    if (invalidEmails.length > 0) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: {
+          owner_email: [`Invalid email address(es): ${invalidEmails.join(', ')}`],
+        },
+      });
+    }
+
+    if (parsed.data.owner_name !== undefined) {
+      patch.owner_name = typeof parsed.data.owner_name === 'string' && parsed.data.owner_name.trim() === ''
+        ? null
+        : parsed.data.owner_name;
+    }
+
+    if (parsed.data.owner_email !== undefined) {
+      patch.owner_email = ownerEmails[0] || null;
+    }
+
+    if (parsed.data.notification_recipients !== undefined || parsed.data.owner_email !== undefined) {
+      const mergedRecipients = [...new Set([...ownerEmails.slice(1), ...extraEmails])];
+      patch.notification_recipients = mergedRecipients;
     }
 
     if (Object.keys(patch).length === 0) {
@@ -376,9 +397,11 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
       return res.status(404).json({ error: 'Site not found' });
     }
 
-    if (!site.owner_email) {
-      return res.status(400).json({ error: 'Site has no owner email address' });
-    }
+
+      // Allow sending without owner_email when extra recipients exist
+      if (!site.owner_email && (!site.notification_recipients || !site.notification_recipients.length)) {
+        return res.status(400).json({ error: 'Site has no owner email address and no notification recipients' });
+      }
 
     let deliveryChannel = 'supabase-function';
     let providerMessageId = null;
@@ -389,6 +412,7 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
     if (site.notification_recipients && Array.isArray(site.notification_recipients)) {
       site.notification_recipients.forEach((email) => allRecipients.add(email));
     }
+      FIXED_ADMIN_CC_RECIPIENTS.forEach((email) => allRecipients.add(email));
 
     if (allRecipients.size === 0) {
       return res.status(400).json({ error: 'No recipient emails configured for this site' });
@@ -435,14 +459,14 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
         return res.status(400).json({
           error: userMessage,
           details: providerMessage,
-          recipient: site.owner_email,
+             recipient: primaryRecipient,
         });
       }
     }
 
     await createSiteContactHistoryEntry({
       siteId: site.id,
-      recipientEmail: site.owner_email,
+         recipientEmail: primaryRecipient,
       subject: parsed.data.subject,
       message: parsed.data.message,
       templateStyle: parsed.data.templateStyle || null,
