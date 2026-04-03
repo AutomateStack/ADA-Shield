@@ -30,6 +30,24 @@ const FIXED_ADMIN_CC_RECIPIENTS = [
 ];
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const ADMIN_CACHE_TTL_MS = Math.max(1000, parseInt(process.env.ADMIN_CACHE_TTL_MS || '30000', 10) || 30000);
+const adminReadCache = new Map();
+
+function getCachedAdminValue(cacheKey, loader) {
+  const cached = adminReadCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) {
+    return Promise.resolve(cached.value);
+  }
+
+  return Promise.resolve(loader()).then((value) => {
+    adminReadCache.set(cacheKey, {
+      value,
+      expiresAt: now + ADMIN_CACHE_TTL_MS,
+    });
+    return value;
+  });
+}
 
 /**
  * Admin auth middleware — validates INTERNAL_API_SECRET header.
@@ -57,7 +75,7 @@ router.use(adminAuth);
 // ── Overview Stats ──────────────────────────────────────────────────
 router.get('/stats', async (req, res, next) => {
   try {
-    const stats = await getAdminStats();
+    const stats = await getCachedAdminValue('stats', () => getAdminStats());
     return res.json(stats);
   } catch (error) {
     next(error);
@@ -71,7 +89,8 @@ router.get('/scans', async (req, res, next) => {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const type = ['free', 'authenticated'].includes(req.query.type) ? req.query.type : undefined;
 
-    const result = await getAdminScans({ page, limit, type });
+    const cacheKey = `scans:${page}:${limit}:${type || 'all'}`;
+    const result = await getCachedAdminValue(cacheKey, () => getAdminScans({ page, limit, type }));
     return res.json(result);
   } catch (error) {
     next(error);
@@ -82,7 +101,8 @@ router.get('/scans', async (req, res, next) => {
 router.get('/scans/top-urls', async (req, res, next) => {
   try {
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 10));
-    const topUrls = await getTopScannedUrls(limit);
+    const cacheKey = `top-urls:${limit}`;
+    const topUrls = await getCachedAdminValue(cacheKey, () => getTopScannedUrls(limit));
     return res.json(topUrls);
   } catch (error) {
     next(error);
@@ -108,7 +128,8 @@ router.get('/users', async (req, res, next) => {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
 
-    const result = await getAdminUsers({ page, limit });
+    const cacheKey = `users:${page}:${limit}`;
+    const result = await getCachedAdminValue(cacheKey, () => getAdminUsers({ page, limit }));
     return res.json(result);
   } catch (error) {
     next(error);
@@ -167,7 +188,20 @@ router.get('/sites', async (req, res, next) => {
       });
     }
 
-    const result = await getAdminSites({
+    const cacheKey = [
+      'sites',
+      page,
+      limit,
+      sortBy,
+      sortOrder,
+      type || 'all',
+      contracted === undefined ? 'all' : String(contracted),
+      risk || 'all',
+      scannedFrom || '',
+      scannedTo || '',
+    ].join(':');
+
+    const result = await getCachedAdminValue(cacheKey, () => getAdminSites({
       page,
       limit,
       sortBy,
@@ -177,7 +211,7 @@ router.get('/sites', async (req, res, next) => {
       risk,
       scannedFrom,
       scannedTo,
-    });
+    }));
     return res.json(result);
   } catch (error) {
     next(error);
@@ -835,7 +869,8 @@ router.get('/subscriptions', async (req, res, next) => {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
 
-    const result = await getAdminSubscriptions({ page, limit });
+    const cacheKey = `subscriptions:${page}:${limit}`;
+    const result = await getCachedAdminValue(cacheKey, () => getAdminSubscriptions({ page, limit }));
     return res.json(result);
   } catch (error) {
     next(error);
