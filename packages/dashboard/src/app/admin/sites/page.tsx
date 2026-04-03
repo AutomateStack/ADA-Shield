@@ -97,6 +97,13 @@ interface EmailTemplateResponse {
   message: string;
 }
 
+function getIsoDateDaysAgo(days: number): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
 export default function AdminSitesPage() {
   const [data, setData] = useState<SitesResponse | null>(null);
   const [page, setPage] = useState(1);
@@ -115,8 +122,7 @@ export default function AdminSitesPage() {
   const [filterType, setFilterType] = useState<'all' | 'free' | 'admin' | 'registered'>('all');
   const [filterContracted, setFilterContracted] = useState<'all' | 'yes' | 'no'>('all');
   const [filterRisk, setFilterRisk] = useState<'all' | 'high' | 'medium' | 'low' | 'unscanned'>('all');
-  const [filterScannedFrom, setFilterScannedFrom] = useState('');
-  const [filterScannedTo, setFilterScannedTo] = useState('');
+  const [filterScannedWindow, setFilterScannedWindow] = useState<'all' | '1' | '7' | '30' | '90'>('all');
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
   const adminSecret = process.env.NEXT_PUBLIC_ADMIN_SECRET || '';
@@ -143,11 +149,8 @@ export default function AdminSitesPage() {
       if (filterRisk !== 'all') {
         params.set('risk', filterRisk);
       }
-      if (filterScannedFrom) {
-        params.set('scannedFrom', filterScannedFrom);
-      }
-      if (filterScannedTo) {
-        params.set('scannedTo', filterScannedTo);
+      if (filterScannedWindow !== 'all') {
+        params.set('scannedFrom', getIsoDateDaysAgo(parseInt(filterScannedWindow, 10)));
       }
 
       const res = await fetch(
@@ -181,8 +184,7 @@ export default function AdminSitesPage() {
     filterType,
     filterContracted,
     filterRisk,
-    filterScannedFrom,
-    filterScannedTo,
+    filterScannedWindow,
   ]);
 
   useEffect(() => {
@@ -366,13 +368,8 @@ export default function AdminSitesPage() {
     setPage(1); // Reset to first page when filter changes
   };
 
-  const handleFilterScannedFromChange = (value: string) => {
-    setFilterScannedFrom(value);
-    setPage(1);
-  };
-
-  const handleFilterScannedToChange = (value: string) => {
-    setFilterScannedTo(value);
+  const handleFilterScannedWindowChange = (value: 'all' | '1' | '7' | '30' | '90') => {
+    setFilterScannedWindow(value);
     setPage(1);
   };
 
@@ -459,33 +456,27 @@ export default function AdminSitesPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <label className="text-sm font-medium text-slate-300">Scanned From:</label>
-          <input
-            type="date"
-            value={filterScannedFrom}
-            onChange={(e) => handleFilterScannedFromChange(e.target.value)}
+          <label className="text-sm font-medium text-slate-300">Scanned In:</label>
+          <select
+            value={filterScannedWindow}
+            onChange={(e) => handleFilterScannedWindowChange(e.target.value as 'all' | '1' | '7' | '30' | '90')}
             className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white hover:bg-white/10 focus:bg-white/10 focus:outline-none focus:ring-1 focus:ring-brand-500"
-          />
+          >
+            <option value="all">Any time</option>
+            <option value="1">Today</option>
+            <option value="7">Last 7 days</option>
+            <option value="30">Last 30 days</option>
+            <option value="90">Last 90 days</option>
+          </select>
         </div>
 
-        <div className="flex items-center gap-2">
-          <label className="text-sm font-medium text-slate-300">Scanned To:</label>
-          <input
-            type="date"
-            value={filterScannedTo}
-            onChange={(e) => handleFilterScannedToChange(e.target.value)}
-            className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white hover:bg-white/10 focus:bg-white/10 focus:outline-none focus:ring-1 focus:ring-brand-500"
-          />
-        </div>
-
-        {(filterType !== 'all' || filterContracted !== 'all' || filterRisk !== 'all' || filterScannedFrom || filterScannedTo) && (
+        {(filterType !== 'all' || filterContracted !== 'all' || filterRisk !== 'all' || filterScannedWindow !== 'all') && (
           <button
             onClick={() => {
               setFilterType('all');
               setFilterContracted('all');
               setFilterRisk('all');
-              setFilterScannedFrom('');
-              setFilterScannedTo('');
+              setFilterScannedWindow('all');
               setPage(1);
             }}
             className="px-3 py-2 text-sm text-slate-300 hover:text-white bg-white/5 border border-white/10 rounded-lg transition-colors"
