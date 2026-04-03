@@ -122,6 +122,22 @@ router.get('/sites', async (req, res, next) => {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const sortBy = String(req.query.sortBy || 'created_at');
     const sortOrder = String(req.query.sortOrder || 'desc');
+
+    const normalizeDateBoundary = (value, boundary) => {
+      if (value === undefined || value === null) return undefined;
+      const raw = String(value).trim();
+      if (!raw) return undefined;
+
+      if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+        return boundary === 'start'
+          ? `${raw}T00:00:00.000Z`
+          : `${raw}T23:59:59.999Z`;
+      }
+
+      const parsed = new Date(raw);
+      if (Number.isNaN(parsed.getTime())) return undefined;
+      return parsed.toISOString();
+    };
     
     // Parse filter parameters
     let type = undefined;
@@ -139,7 +155,29 @@ router.get('/sites', async (req, res, next) => {
       risk = String(req.query.risk);
     }
 
-    const result = await getAdminSites({ page, limit, sortBy, sortOrder, type, contracted, risk });
+    const scannedFrom = normalizeDateBoundary(req.query.scannedFrom, 'start');
+    const scannedTo = normalizeDateBoundary(req.query.scannedTo, 'end');
+
+    if (scannedFrom && scannedTo && new Date(scannedFrom) > new Date(scannedTo)) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: {
+          scannedFrom: ['scannedFrom must be before or equal to scannedTo'],
+        },
+      });
+    }
+
+    const result = await getAdminSites({
+      page,
+      limit,
+      sortBy,
+      sortOrder,
+      type,
+      contracted,
+      risk,
+      scannedFrom,
+      scannedTo,
+    });
     return res.json(result);
   } catch (error) {
     next(error);

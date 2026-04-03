@@ -281,15 +281,30 @@ async function getAdminScanDetail(scanId) {
  * @param {string} [params.type] - Filter by type: 'free' | 'admin' | 'registered'
  * @param {boolean} [params.contracted] - Filter by contracted (contacted_count > 0)
  * @param {string} [params.risk] - Filter by latest risk: 'high' | 'medium' | 'low' | 'unscanned'
+ * @param {string} [params.scannedFrom] - ISO timestamp lower bound for latest scan date
+ * @param {string} [params.scannedTo] - ISO timestamp upper bound for latest scan date
  */
-async function getAdminSites({ page = 1, limit = 20, sortBy = 'created_at', sortOrder = 'desc', type, contracted, risk } = {}) {
+async function getAdminSites({
+  page = 1,
+  limit = 20,
+  sortBy = 'created_at',
+  sortOrder = 'desc',
+  type,
+  contracted,
+  risk,
+  scannedFrom,
+  scannedTo,
+} = {}) {
   try {
     const allowedSortBy = new Set(['created_at', 'contacted_count', 'last_contacted_at']);
     const normalizedSortBy = allowedSortBy.has(sortBy) ? sortBy : 'created_at';
     const normalizedSortOrder = sortOrder === 'asc' ? 'asc' : 'desc';
 
     let filteredSiteIdsByRisk = null;
-    if (risk && ['high', 'medium', 'low', 'unscanned'].includes(risk)) {
+    let filteredSiteIdsByScanDate = null;
+    const shouldFilterByScanDate = Boolean(scannedFrom || scannedTo);
+
+    if ((risk && ['high', 'medium', 'low', 'unscanned'].includes(risk)) || shouldFilterByScanDate) {
       const { data: allScans, error: allScansError } = await supabase
         .from('scan_results')
         .select('site_id, risk_score, scanned_at')
@@ -298,10 +313,23 @@ async function getAdminSites({ page = 1, limit = 20, sortBy = 'created_at', sort
       if (allScansError) throw allScansError;
 
       const latestRiskBySiteId = {};
+      const latestScannedAtBySiteId = {};
       for (const scan of allScans || []) {
         if (scan.site_id && !Object.prototype.hasOwnProperty.call(latestRiskBySiteId, scan.site_id)) {
           latestRiskBySiteId[scan.site_id] = scan.risk_score;
+          latestScannedAtBySiteId[scan.site_id] = scan.scanned_at;
         }
+      }
+
+      if (shouldFilterByScanDate) {
+        filteredSiteIdsByScanDate = Object.keys(latestScannedAtBySiteId).filter((siteId) => {
+          const scannedAt = latestScannedAtBySiteId[siteId];
+          if (!scannedAt) return false;
+
+          if (scannedFrom && scannedAt < scannedFrom) return false;
+          if (scannedTo && scannedAt > scannedTo) return false;
+          return true;
+        });
       }
 
       if (risk === 'unscanned') {
@@ -330,6 +358,18 @@ async function getAdminSites({ page = 1, limit = 20, sortBy = 'created_at', sort
         'id, user_id, url, name, created_at, owner_name, owner_email, notification_recipients, contacted_count, last_contacted_at, type',
         { count: 'exact' }
       );
+
+    if (filteredSiteIdsByScanDate) {
+      if (filteredSiteIdsByScanDate.length === 0) {
+        return {
+          sites: [],
+          total: 0,
+          page,
+          totalPages: 0,
+        };
+      }
+      query = query.in('id', filteredSiteIdsByScanDate);
+    }
 
     if (filteredSiteIdsByRisk) {
       if (filteredSiteIdsByRisk.length === 0) {
