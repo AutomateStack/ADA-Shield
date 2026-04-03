@@ -111,30 +111,16 @@ async function getAdminScans({ page = 1, limit = 20, type } = {}) {
  */
 async function getTopScannedUrls(limit = 10) {
   try {
-    // Fetch only recent URLs (last 10k) to avoid loading entire table into memory
-    const { data, error } = await supabase
-      .from('scan_results')
-      .select('url')
-      .order('scanned_at', { ascending: false })
-      .limit(10000);
-
+    const safeLimit = Math.min(50, Math.max(1, parseInt(limit, 10) || 10));
+    const { data, error } = await supabase.rpc('get_top_scanned_urls', {
+      limit_count: safeLimit,
+    });
     if (error) throw error;
 
-    // Aggregate by hostname in JS
-    const counts = {};
-    for (const row of (data || [])) {
-      try {
-        const hostname = new URL(row.url).hostname;
-        counts[hostname] = (counts[hostname] || 0) + 1;
-      } catch {
-        // Skip malformed URLs
-      }
-    }
-
-    return Object.entries(counts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, limit)
-      .map(([hostname, count]) => ({ hostname, scanCount: count }));
+    return (data || []).map((row) => ({
+      hostname: row.hostname,
+      scanCount: row.scan_count,
+    }));
   } catch (error) {
     logger.error('Failed to get top scanned URLs', { error: error.message });
     throw error;
@@ -302,30 +288,25 @@ async function getAdminSites({
 
     let filteredSiteIdsByRisk = null;
     let filteredSiteIdsByScanDate = null;
+    let latestBySiteMap = {};
     const shouldFilterByScanDate = Boolean(scannedFrom || scannedTo);
+    const shouldFilterByRisk = Boolean(risk && ['high', 'medium', 'low', 'unscanned'].includes(risk));
 
-    if ((risk && ['high', 'medium', 'low', 'unscanned'].includes(risk)) || shouldFilterByScanDate) {
-      const { data: allScans, error: allScansError } = await supabase
-        .from('scan_results')
-        .select('site_id, risk_score, scanned_at')
-        .order('scanned_at', { ascending: false });
+    if (shouldFilterByRisk || shouldFilterByScanDate) {
+      const { data: latestBySite, error: latestBySiteError } = await supabase.rpc('get_latest_scan_per_site', {
+        site_ids: null,
+      });
+      if (latestBySiteError) throw latestBySiteError;
 
-      if (allScansError) throw allScansError;
-
-      const latestRiskBySiteId = {};
-      const latestScannedAtBySiteId = {};
-      for (const scan of allScans || []) {
-        if (scan.site_id && !Object.prototype.hasOwnProperty.call(latestRiskBySiteId, scan.site_id)) {
-          latestRiskBySiteId[scan.site_id] = scan.risk_score;
-          latestScannedAtBySiteId[scan.site_id] = scan.scanned_at;
-        }
-      }
+      latestBySiteMap = (latestBySite || []).reduce((acc, row) => {
+        if (row?.site_id) acc[row.site_id] = row;
+        return acc;
+      }, {});
 
       if (shouldFilterByScanDate) {
-        filteredSiteIdsByScanDate = Object.keys(latestScannedAtBySiteId).filter((siteId) => {
-          const scannedAt = latestScannedAtBySiteId[siteId];
+        filteredSiteIdsByScanDate = Object.keys(latestBySiteMap).filter((siteId) => {
+          const scannedAt = latestBySiteMap[siteId]?.scanned_at;
           if (!scannedAt) return false;
-
           if (scannedFrom && scannedAt < scannedFrom) return false;
           if (scannedTo && scannedAt > scannedTo) return false;
           return true;
@@ -340,10 +321,10 @@ async function getAdminSites({
 
         filteredSiteIdsByRisk = (allSitesOnly || [])
           .map((s) => s.id)
-          .filter((siteId) => !Object.prototype.hasOwnProperty.call(latestRiskBySiteId, siteId));
-      } else {
-        filteredSiteIdsByRisk = Object.keys(latestRiskBySiteId).filter((siteId) => {
-          const score = latestRiskBySiteId[siteId];
+          .filter((siteId) => !Object.prototype.hasOwnProperty.call(latestBySiteMap, siteId));
+      } else if (shouldFilterByRisk) {
+        filteredSiteIdsByRisk = Object.keys(latestBySiteMap).filter((siteId) => {
+          const score = latestBySiteMap[siteId]?.risk_score;
           if (!Number.isFinite(score)) return false;
           if (risk === 'high') return score >= 70;
           if (risk === 'medium') return score >= 40 && score < 70;
@@ -410,19 +391,17 @@ async function getAdminSites({
     const latestScannedAtBySiteId = {};
 
     if (siteIds.length > 0) {
-      const { data: siteScans, error: scansError } = await supabase
-        .from('scan_results')
-        .select('site_id, risk_score, scanned_at')
-        .in('site_id', siteIds)
-        .order('scanned_at', { ascending: false });
+      const { data: latestForPage, error: latestForPageError } = await supabase.rpc('get_latest_scan_per_site', {
+        site_ids: siteIds,
+      });
 
-      if (scansError) {
-        logger.warn('Could not fetch latest scan risk for admin sites view', { error: scansError.message });
+      if (latestForPageError) {
+        logger.warn('Could not fetch latest scan risk for admin sites view', { error: latestForPageError.message });
       } else {
-        for (const scan of siteScans || []) {
-          if (!latestRiskBySiteId[scan.site_id]) {
-            latestRiskBySiteId[scan.site_id] = scan.risk_score;
-            latestScannedAtBySiteId[scan.site_id] = scan.scanned_at;
+        for (const row of latestForPage || []) {
+          if (row.site_id) {
+            latestRiskBySiteId[row.site_id] = row.risk_score;
+            latestScannedAtBySiteId[row.site_id] = row.scanned_at;
           }
         }
       }

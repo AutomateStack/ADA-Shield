@@ -225,7 +225,6 @@ function initScanWorker() {
         seriousCount: scanResult.seriousCount,
         moderateCount: scanResult.moderateCount,
         minorCount: scanResult.minorCount,
-        violations: scanResult.violations,
         passedRules: scanResult.passedRules,
         scanDurationMs: scanResult.scanDurationMs,
       };

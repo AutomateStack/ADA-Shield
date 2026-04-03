@@ -1,0 +1,34 @@
+# ── ADA Shield Docker build context exclusions ──────────────────────
+# Keeps the build context small so Railway builds fast.
+
+# Dev dependencies / tooling
+node_modules
+.env*
+!.env.example
+*.log
+npm-debug.log*
+
+# Dashboard package — deploys separately to Vercel, not included in API image
+packages/dashboard
+
+# Git / IDE
+.git
+.gitignore
+.github
+.vscode
+.idea
+
+# Docs / CI config (not needed in image)
+README.md
+LICENSE
+*.md
+render.yaml
+vercel.json
+
+# Test output
+coverage
+.nyc_output
+
+# OS junk
+.DS_Store
+Thumbs.db
