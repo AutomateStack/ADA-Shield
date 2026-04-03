@@ -113,6 +113,64 @@ const DEFAULT_NAV_OPTIONS = {
 };
 
 /**
+ * Detects whether an error is a Puppeteer navigation timeout.
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isNavigationTimeoutError(error) {
+  const message = error?.message || '';
+  return (
+    typeof message === 'string' &&
+    message.toLowerCase().includes('navigation timeout')
+  );
+}
+
+/**
+ * Navigates with retries and fallback wait strategies for slow websites.
+ * @param {import('puppeteer').Page} page
+ * @param {string} url
+ * @param {number} timeoutMs
+ * @returns {Promise<{waitUntil: "load"|"domcontentloaded", timeout: number}>}
+ */
+async function navigateWithRetry(page, url, timeoutMs) {
+  const attempts = [
+    { waitUntil: 'load', timeout: timeoutMs },
+    { waitUntil: 'load', timeout: Math.max(timeoutMs + 15000, 45000) },
+    { waitUntil: 'domcontentloaded', timeout: Math.max(timeoutMs + 15000, 45000) },
+  ];
+
+  let lastError;
+
+  for (let i = 0; i < attempts.length; i++) {
+    const attempt = attempts[i];
+    try {
+      await page.goto(url, attempt);
+      return attempt;
+    } catch (error) {
+      lastError = error;
+      const isTimeout = isNavigationTimeoutError(error);
+      const isLastAttempt = i === attempts.length - 1;
+
+      logger.warn('Navigation attempt failed', {
+        url,
+        attempt: i + 1,
+        waitUntil: attempt.waitUntil,
+        timeout: attempt.timeout,
+        isTimeout,
+        error: error.message,
+      });
+
+      // Only retry navigation timeouts; bubble up other failures immediately.
+      if (!isTimeout || isLastAttempt) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+/**
  * Extracts site contact metadata from page HTML.
  * Looks for common patterns: company name, contact email, sitemap, etc.
  * @param {import('puppeteer').Page} page
@@ -244,15 +302,18 @@ async function scanPage(url, options = {}) {
     // Allow axe-core injection even on pages with strict CSP
     await page.setBypassCSP(true);
 
-    // Navigate to the page — use 'load' instead of 'networkidle2'
-    // to avoid hanging on sites with persistent connections
-    await page.goto(url, {
-      waitUntil: 'load',
-      timeout: options.timeout || DEFAULT_NAV_OPTIONS.timeout,
-    });
+    // Navigate with fallback strategies to reduce flaky timeout failures.
+    const navTimeout = options.timeout || DEFAULT_NAV_OPTIONS.timeout;
+    const navAttempt = await navigateWithRetry(page, url, navTimeout);
 
     // Additional wait for dynamic content to settle
     await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    logger.info('Navigation complete', {
+      url,
+      waitUntil: navAttempt.waitUntil,
+      timeout: navAttempt.timeout,
+    });
 
     // Remove all iframes from the DOM to prevent axe frame analysis errors
     await page.evaluate(() => {
