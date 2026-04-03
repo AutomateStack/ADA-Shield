@@ -10,6 +10,7 @@ const { generateFix } = require('./fix-suggester');
 // Reuses browser instances to avoid ~8s launch overhead per scan.
 // Automatically recycles after MAX_PAGES_PER_BROWSER to prevent memory leaks.
 const MAX_PAGES_PER_BROWSER = 20;
+const BROWSER_POOL_ENABLED = process.env.SCANNER_BROWSER_POOL !== 'false';
 let _browserInstance = null;
 let _browserPageCount = 0;
 let _browserLock = Promise.resolve();
@@ -19,6 +20,10 @@ let _browserLock = Promise.resolve();
  * Thread-safe via promise chain lock.
  */
 async function getBrowser() {
+  if (!BROWSER_POOL_ENABLED) {
+    throw new Error('Browser pool disabled by SCANNER_BROWSER_POOL=false');
+  }
+
   _browserLock = _browserLock.then(async () => {
     if (_browserInstance && _browserInstance.isConnected() && _browserPageCount < MAX_PAGES_PER_BROWSER) {
       _browserPageCount++;
@@ -266,12 +271,12 @@ async function extractPageMetadata(page) {
 async function scanPage(url, options = {}) {
   const startTime = Date.now();
   let page = null;
+  let browser = null;
   let usedPool = false;
 
   try {
     logger.info('Starting scan', { url });
 
-    let browser;
     try {
       // Try pooled browser first (faster)
       browser = await getBrowser();
@@ -372,9 +377,12 @@ async function scanPage(url, options = {}) {
     logger.error('Scan failed', { url, error: error.message });
     throw new Error(`Scan failed for ${url}: ${error.message}`);
   } finally {
-    // Close the page, not the browser (pool manages browser lifecycle)
+    // Always close page. Close browser too when standalone mode is used.
     if (page) {
       try { await page.close(); } catch { /* ignore */ }
+    }
+    if (browser && !usedPool) {
+      try { await browser.close(); } catch { /* ignore */ }
     }
   }
 }
