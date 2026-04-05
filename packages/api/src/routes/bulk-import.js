@@ -114,6 +114,30 @@ const bulkSettingsSchema = z.object({
   dailyLimit: z.coerce.number().int().min(1).max(100),
 });
 
+async function getQueueDiagnostics() {
+  const queue = getBulkQueue();
+  if (!queue) {
+    return {
+      queueAvailable: false,
+      waiting: 0,
+      active: 0,
+      delayed: 0,
+      completed: 0,
+      failed: 0,
+    };
+  }
+
+  const counts = await queue.getJobCounts('waiting', 'active', 'delayed', 'completed', 'failed');
+  return {
+    queueAvailable: true,
+    waiting: counts.waiting || 0,
+    active: counts.active || 0,
+    delayed: counts.delayed || 0,
+    completed: counts.completed || 0,
+    failed: counts.failed || 0,
+  };
+}
+
 /**
  * Given a worksheet, returns an array of row objects with normalised column names.
  * Handles case-insensitive and whitespace-trimmed header matching.
@@ -375,10 +399,22 @@ router.post('/run-now', requireAdmin, async (req, res, next) => {
       });
     }
 
+    const diagnosticsBefore = await getQueueDiagnostics();
     const dailyLimit = parsed.data.dailyLimit || await getBulkDailyLimit();
     const outcome = await enqueuePendingBulkSites(dailyLimit);
+    const diagnosticsAfter = await getQueueDiagnostics();
+
+    logger.info('Bulk Run Now request processed', {
+      requestedDailyLimit: dailyLimit,
+      enqueued: outcome.enqueued,
+      diagnosticsBefore,
+      diagnosticsAfter,
+    });
+
     return res.json({
       ...outcome,
+      diagnosticsBefore,
+      diagnosticsAfter,
       message: `Queued ${outcome.enqueued} site(s) to scan and send email now.`,
     });
   } catch (err) {

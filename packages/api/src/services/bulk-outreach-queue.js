@@ -190,8 +190,11 @@ async function enqueueBulkSite({ siteId, batchId }) {
   if (!queue) {
     throw new Error('Bulk outreach queue not available — REDIS_URL not configured');
   }
+  // Use a batch-scoped job id so the same site can be retried in future runs.
+  // A permanent site-level job id blocks re-enqueue after a prior fail/complete.
+  const batchScope = batchId || `adhoc-${Date.now()}`;
   const job = await queue.add('process-site', { siteId, batchId }, {
-    jobId: `bulk-${siteId}`, // deduplicate: one job per site ever
+    jobId: `bulk-${siteId}-${batchScope}`,
   });
   logger.info('Bulk site enqueued', { jobId: job.id, siteId });
   return job;
