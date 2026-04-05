@@ -233,7 +233,8 @@ async function processOneSite(siteId, batchId) {
     throw new Error(`Scan failed for ${site.url}: ${scanErr.message}`);
   }
 
-  const riskScore = calculateRiskScore(scanData.violations || []);
+  const riskResult = calculateRiskScore(scanData.violations || []);
+  const riskScore = riskResult.score;
   const industry = detectIndustry(site.url, site.name);
   const industryCtx = getIndustryContext(industry);
 
@@ -242,12 +243,24 @@ async function processOneSite(siteId, batchId) {
   const scanRecord = await saveScanResult({
     siteId: site.id,
     userId: null,
-    url: site.url,
-    violations: scanData.violations || [],
+    url: scanData.url || site.url,
     riskScore,
-    pagesScanned: scanData.pagesScanned || 1,
+    totalViolations: scanData.totalViolations || 0,
+    criticalCount: scanData.criticalCount || 0,
+    seriousCount: scanData.seriousCount || 0,
+    moderateCount: scanData.moderateCount || 0,
+    minorCount: scanData.minorCount || 0,
+    violations: scanData.violations || [],
+    passedRules: scanData.passedRules || 0,
+    incompleteRules: scanData.incompleteRules || 0,
+    scanDurationMs: scanData.scanDurationMs || 0,
     publicToken,
   });
+
+  await supabase
+    .from('sites')
+    .update({ last_scanned_at: new Date().toISOString() })
+    .eq('id', site.id);
 
   // 3. Build email
   const recipients = [
