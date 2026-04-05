@@ -771,6 +771,9 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
         siteUrl: site.url,
         trackedReportUrl: trackingUrls.trackedReportUrl,
         trackingPixelUrl: trackingUrls.trackingPixelUrl,
+        selfScanUrl: buildReportUrl(null, {
+          dashboardBaseUrl: dashboardOrigin,
+        }),
       });
 
       const contactEntry = await createSiteContactHistoryEntry({

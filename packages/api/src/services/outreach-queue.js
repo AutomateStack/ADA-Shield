@@ -198,6 +198,7 @@ function initOutreachWorker() {
         siteUrl: site?.url || '',
         trackedReportUrl: trackingUrls.trackedReportUrl,
         trackingPixelUrl: trackingUrls.trackingPixelUrl,
+        selfScanUrl: buildReportUrl(null),
       });
 
       const response = await sendEmail({
