@@ -204,22 +204,39 @@ async function enqueueBulkSite({ siteId, batchId }) {
 // ── Daily trigger job ──────────────────────────────────────────────
 
 /**
- * Registers a repeatable cron job that fires every day at 09:00 UTC.
- * Each fire picks the next configured daily limit and enqueues them.
+ * Registers a repeatable cron job.
+ * Schedule is controlled by the BULK_OUTREACH_CRON env variable (standard cron syntax).
+ * Defaults to '0 9 * * *' (09:00 UTC daily) when the variable is not set.
+ *
+ * Common examples:
+ *   '0 9 * * *'      — every day at 09:00 UTC
+ *   '0 14 * * *'     — every day at 14:00 UTC
+ *   '0 9 * * 1-5'    — weekdays only at 09:00 UTC
+ *   '0 9,14 * * *'   — twice a day at 09:00 and 14:00 UTC
  */
 async function scheduleDailyTrigger() {
   const queue = getBulkQueue();
   if (!queue) return;
 
+  const cronExpression = (process.env.BULK_OUTREACH_CRON || '0 9 * * *').trim();
+
+  // Remove any existing repeatable job first so the new schedule takes effect
+  // immediately on next deploy rather than waiting for the old schedule to tick.
+  try {
+    await queue.removeRepeatable('daily-trigger', { cron: cronExpression, jobId: 'bulk-daily-trigger' });
+  } catch {
+    // Ignore — job may not exist yet on first run
+  }
+
   await queue.add(
     'daily-trigger',
     {},
     {
-      repeat: { cron: '0 9 * * *' },
+      repeat: { cron: cronExpression },
       jobId: 'bulk-daily-trigger',
     }
   );
-  logger.info('Daily bulk trigger scheduled (09:00 UTC)');
+  logger.info('Daily bulk trigger scheduled', { cron: cronExpression });
 }
 
 // ── Core processing logic ──────────────────────────────────────────
