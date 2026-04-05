@@ -14,9 +14,11 @@ const { billingRoutes } = require('./routes/billing');
 const { notificationRoutes } = require('./routes/notifications');
 const { adminRoutes } = require('./routes/admin');
 const { siteRoutes } = require('./routes/sites');
+const { outreachRoutes } = require('./routes/outreach');
 const { errorHandler } = require('./middleware/error-handler');
 const { createRateLimiter } = require('./middleware/rate-limiter');
 const { initScanQueue, initScanWorker } = require('./services/scan-queue');
+const { initOutreachQueue, initOutreachWorker } = require('./services/outreach-queue');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -61,6 +63,7 @@ app.get('/health', (_req, res) => {
 // ── API Routes ──────────────────────────────────────────────────────
 app.use('/api/scan', scanRoutes);
 app.use('/api/sites', siteRoutes);
+app.use('/api/outreach', outreachRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/internal', internalRoutes);
@@ -96,6 +99,8 @@ app.listen(PORT, () => {
   // Initialise BullMQ queue and in-process worker (no-ops if REDIS_URL is absent)
   initScanQueue();
   initScanWorker();
+  initOutreachQueue();
+  initOutreachWorker();
 });
 
 module.exports = { app };

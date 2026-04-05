@@ -66,10 +66,19 @@ interface ContactHistoryEntry {
   recipient_email: string;
   subject: string;
   message: string;
+  tracking_token: string | null;
   template_style: EmailTemplateStyle | null;
   delivery_channel: 'supabase-function' | 'api-fallback' | null;
   delivery_status: 'sent' | 'failed' | null;
   provider_message_id: string | null;
+  opens_count: number;
+  clicks_count: number;
+  lead_score: number;
+  lead_status: 'cold' | 'warm' | 'hot';
+  follow_up_status: 'none' | 'scheduled' | 'sent' | 'skipped' | 'canceled';
+  follow_up_rule: string | null;
+  follow_up_scheduled_for: string | null;
+  last_engagement_at: string | null;
   created_at: string;
 }
 
@@ -84,6 +93,65 @@ interface ContactHistoryResponse {
   total: number;
   page: number;
   totalPages: number;
+}
+
+interface OutreachOverviewResponse {
+  summary: {
+    sentCount: number;
+    openedCount: number;
+    clickedCount: number;
+    openRate: number;
+    clickRate: number;
+    hotLeadCount: number;
+    followUpsScheduled: number;
+  };
+  topLeads: Array<{
+    id: string;
+    siteId: string;
+    recipientEmail: string;
+    subject: string;
+    leadScore: number;
+    leadStatus: 'cold' | 'warm' | 'hot';
+    opensCount: number;
+    clicksCount: number;
+    lastEngagementAt: string | null;
+    followUpStatus: string | null;
+    followUpScheduledFor: string | null;
+    siteName: string | null;
+    siteUrl: string | null;
+  }>;
+  recentEvents: Array<{
+    id: string;
+    event_type: string;
+    created_at: string;
+  }>;
+}
+
+interface SiteOutreachAnalyticsResponse {
+  site: {
+    id: string;
+    name: string | null;
+    url: string;
+  } | null;
+  summary: {
+    sentCount: number;
+    openedCount: number;
+    clickedCount: number;
+    openRate: number;
+    clickRate: number;
+    hotLeadCount: number;
+    followUpsScheduled: number;
+    topLeadScore: number;
+    topLeadStatus: 'cold' | 'warm' | 'hot';
+    lastEngagementAt: string | null;
+  };
+  entries: ContactHistoryEntry[];
+  events: Array<{
+    id: string;
+    event_type: string;
+    created_at: string;
+    metadata?: Record<string, unknown>;
+  }>;
 }
 
 type EmailTemplateStyle = 'fear_urgency' | 'friendly_educational' | 'concise_direct';
@@ -119,6 +187,8 @@ export default function AdminSitesPage() {
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyData, setHistoryData] = useState<ContactHistoryResponse | null>(null);
+  const [outreachOverview, setOutreachOverview] = useState<OutreachOverviewResponse | null>(null);
+  const [siteAnalytics, setSiteAnalytics] = useState<SiteOutreachAnalyticsResponse | null>(null);
   const [filterType, setFilterType] = useState<'all' | 'free' | 'admin' | 'registered'>('all');
   const [filterContracted, setFilterContracted] = useState<'all' | 'yes' | 'no'>('all');
   const [filterRisk, setFilterRisk] = useState<'all' | 'high' | 'medium' | 'low' | 'unscanned'>('all');
@@ -187,9 +257,24 @@ export default function AdminSitesPage() {
     filterScannedWindow,
   ]);
 
+  const fetchOutreachOverview = useCallback(async () => {
+    try {
+      const res = await fetch(`${apiUrl}/api/admin/outreach/overview?limit=8`, {
+        headers: { 'x-admin-secret': adminSecret },
+      });
+
+      if (!res.ok) throw new Error('Failed to fetch outreach overview');
+      const payload: OutreachOverviewResponse = await res.json();
+      setOutreachOverview(payload);
+    } catch {
+      setOutreachOverview(null);
+    }
+  }, [apiUrl, adminSecret]);
+
   useEffect(() => {
     fetchSites();
-  }, [fetchSites]);
+    fetchOutreachOverview();
+  }, [fetchSites, fetchOutreachOverview]);
 
   const updateDraft = (siteId: string, key: keyof DraftRow, value: string) => {
     setDrafts((prev) => ({
@@ -317,6 +402,7 @@ export default function AdminSitesPage() {
       alert('Email sent successfully');
       setEmailModal(null);
       await fetchSites();
+      await fetchOutreachOverview();
     } catch (err: any) {
       alert(err.message || 'Failed to send email');
     } finally {
@@ -337,14 +423,23 @@ export default function AdminSitesPage() {
     setHistoryModalOpen(true);
     setHistoryLoading(true);
     setHistoryData(null);
+    setSiteAnalytics(null);
 
     try {
-      const res = await fetch(`${apiUrl}/api/admin/sites/${site.id}/contact-history?page=1&limit=20`, {
-        headers: { 'x-admin-secret': adminSecret },
-      });
-      if (!res.ok) throw new Error('Failed to load contact history');
-      const payload: ContactHistoryResponse = await res.json();
-      setHistoryData(payload);
+      const [historyRes, analyticsRes] = await Promise.all([
+        fetch(`${apiUrl}/api/admin/sites/${site.id}/contact-history?page=1&limit=20`, {
+          headers: { 'x-admin-secret': adminSecret },
+        }),
+        fetch(`${apiUrl}/api/admin/sites/${site.id}/outreach-analytics`, {
+          headers: { 'x-admin-secret': adminSecret },
+        }),
+      ]);
+      if (!historyRes.ok) throw new Error('Failed to load contact history');
+      if (!analyticsRes.ok) throw new Error('Failed to load outreach analytics');
+      const historyPayload: ContactHistoryResponse = await historyRes.json();
+      const analyticsPayload: SiteOutreachAnalyticsResponse = await analyticsRes.json();
+      setHistoryData(historyPayload);
+      setSiteAnalytics(analyticsPayload);
     } catch (err: any) {
       alert(err.message || 'Failed to load contact history');
       setHistoryModalOpen(false);
@@ -398,7 +493,10 @@ export default function AdminSitesPage() {
           </p>
         </div>
         <button
-          onClick={fetchSites}
+          onClick={() => {
+            fetchSites();
+            fetchOutreachOverview();
+          }}
           className="p-2 text-slate-400 hover:text-white bg-white/5 border border-white/10 rounded-lg transition-colors"
         >
           <RefreshCw className="h-4 w-4" />
@@ -408,6 +506,71 @@ export default function AdminSitesPage() {
       {error && (
         <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-300 text-sm">
           {error}
+        </div>
+      )}
+
+      {outreachOverview && (
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <div className="text-xs uppercase tracking-wider text-slate-500">Emails Sent</div>
+              <div className="mt-2 text-2xl font-bold text-white">{outreachOverview.summary.sentCount}</div>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <div className="text-xs uppercase tracking-wider text-slate-500">Open Rate</div>
+              <div className="mt-2 text-2xl font-bold text-white">{outreachOverview.summary.openRate}%</div>
+              <div className="mt-1 text-xs text-slate-400">{outreachOverview.summary.openedCount} leads opened</div>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <div className="text-xs uppercase tracking-wider text-slate-500">Click Rate</div>
+              <div className="mt-2 text-2xl font-bold text-white">{outreachOverview.summary.clickRate}%</div>
+              <div className="mt-1 text-xs text-slate-400">{outreachOverview.summary.clickedCount} leads clicked</div>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <div className="text-xs uppercase tracking-wider text-slate-500">Hot Leads</div>
+              <div className="mt-2 text-2xl font-bold text-white">{outreachOverview.summary.hotLeadCount}</div>
+              <div className="mt-1 text-xs text-slate-400">{outreachOverview.summary.followUpsScheduled} follow-ups scheduled</div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold text-white">Top Interested Leads</h2>
+                <p className="mt-1 text-xs text-slate-400">Highest-scoring recipients from tracked outreach.</p>
+              </div>
+            </div>
+            <div className="mt-4 space-y-3">
+              {outreachOverview.topLeads.length === 0 ? (
+                <div className="text-sm text-slate-500">No tracked outreach activity yet.</div>
+              ) : (
+                outreachOverview.topLeads.slice(0, 5).map((lead) => (
+                  <div key={lead.id} className="rounded-lg border border-white/10 bg-black/10 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-medium text-slate-200">{lead.siteName || lead.siteUrl || lead.recipientEmail}</div>
+                        <div className="mt-1 text-xs text-slate-400">{lead.recipientEmail}</div>
+                      </div>
+                      <span
+                        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
+                          lead.leadStatus === 'hot'
+                            ? 'bg-red-500/15 text-red-300'
+                            : lead.leadStatus === 'warm'
+                            ? 'bg-amber-500/15 text-amber-300'
+                            : 'bg-slate-500/15 text-slate-300'
+                        }`}
+                      >
+                        {lead.leadScore} {lead.leadStatus}
+                      </span>
+                    </div>
+                    <div className="mt-2 text-xs text-slate-500">
+                      {lead.opensCount} opens, {lead.clicksCount} clicks, last activity {formatRelativeTime(lead.lastEngagementAt)}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -672,7 +835,6 @@ export default function AdminSitesPage() {
                 <h2 className="text-lg font-bold text-white">Send Email to {emailModal.siteName}</h2>
                 <div className="mt-2 space-y-1">
                   <p className="text-xs text-slate-400"><strong>To:</strong> <span className="break-all">{emailModal.recipientSummary}</span></p>
-                  <p className="text-xs text-slate-500"><strong>CC:</strong> tthirmal@gmail.com (monitoring)</p>
                 </div>
               </div>
               <button
@@ -781,7 +943,29 @@ export default function AdminSitesPage() {
               ) : !historyData || historyData.entries.length === 0 ? (
                 <div className="text-center text-slate-400 py-8">No contact history yet</div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-5">
+                  {siteAnalytics && (
+                    <div className="grid gap-3 md:grid-cols-4">
+                      <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                        <div className="text-[11px] uppercase tracking-wider text-slate-500">Sent</div>
+                        <div className="mt-2 text-xl font-semibold text-white">{siteAnalytics.summary.sentCount}</div>
+                      </div>
+                      <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                        <div className="text-[11px] uppercase tracking-wider text-slate-500">Open Rate</div>
+                        <div className="mt-2 text-xl font-semibold text-white">{siteAnalytics.summary.openRate}%</div>
+                      </div>
+                      <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                        <div className="text-[11px] uppercase tracking-wider text-slate-500">Click Rate</div>
+                        <div className="mt-2 text-xl font-semibold text-white">{siteAnalytics.summary.clickRate}%</div>
+                      </div>
+                      <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                        <div className="text-[11px] uppercase tracking-wider text-slate-500">Top Lead</div>
+                        <div className="mt-2 text-xl font-semibold text-white">{siteAnalytics.summary.topLeadScore}</div>
+                        <div className="text-xs text-slate-400 capitalize">{siteAnalytics.summary.topLeadStatus}</div>
+                      </div>
+                    </div>
+                  )}
+
                   {historyData.entries.map((entry) => (
                     <div key={entry.id} className="border border-white/10 rounded-lg p-4 bg-white/[0.02]">
                       <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400 mb-2">
@@ -789,12 +973,36 @@ export default function AdminSitesPage() {
                         <span>Style: {entry.template_style || 'n/a'}</span>
                         <span>Channel: {entry.delivery_channel || 'n/a'}</span>
                         <span>Status: {entry.delivery_status || 'n/a'}</span>
+                        <span>Opens: {entry.opens_count || 0}</span>
+                        <span>Clicks: {entry.clicks_count || 0}</span>
+                        <span>Lead Score: {entry.lead_score || 0}</span>
+                        <span className="capitalize">Lead: {entry.lead_status || 'cold'}</span>
                       </div>
                       <div className="text-sm text-slate-200 font-medium mb-1">{entry.subject}</div>
                       <div className="text-xs text-slate-400 mb-2">To: {entry.recipient_email}</div>
+                      <div className="mb-2 flex flex-wrap gap-2 text-[11px] text-slate-500">
+                        <span className="capitalize">Follow-up: {entry.follow_up_status || 'none'}</span>
+                        {entry.follow_up_rule && <span>Rule: {entry.follow_up_rule}</span>}
+                        {entry.follow_up_scheduled_for && <span>Next: {formatRelativeTime(entry.follow_up_scheduled_for)}</span>}
+                        {entry.last_engagement_at && <span>Last activity: {formatRelativeTime(entry.last_engagement_at)}</span>}
+                      </div>
                       <div className="text-sm text-slate-300 whitespace-pre-wrap line-clamp-6">{entry.message}</div>
                     </div>
                   ))}
+
+                  {siteAnalytics && siteAnalytics.events.length > 0 && (
+                    <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02]">
+                      <div className="text-sm font-medium text-slate-200">Recent Tracking Events</div>
+                      <div className="mt-3 space-y-2">
+                        {siteAnalytics.events.slice(0, 10).map((event) => (
+                          <div key={event.id} className="flex items-center justify-between gap-3 text-xs text-slate-400">
+                            <span className="capitalize">{event.event_type.replace(/_/g, ' ')}</span>
+                            <span>{formatRelativeTime(event.created_at)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
