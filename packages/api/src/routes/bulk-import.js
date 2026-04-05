@@ -121,8 +121,18 @@ function parseSheet(worksheet) {
       normalised.phone_number ||
       normalised.tel ||
       '';
+    const name =
+      normalised.name ||
+      normalised.owner_name ||
+      normalised.contact_name ||
+      '';
+    const siteName =
+      normalised.site_name ||
+      normalised.business_name ||
+      normalised.company_name ||
+      '';
 
-    return { url, email, facebook, instagram, phone };
+    return { url, email, facebook, instagram, phone, name, siteName };
   });
 }
 
@@ -178,6 +188,8 @@ router.post('/', requireAdmin, upload.single('file'), async (req, res, next) => 
     for (const row of rows) {
       const siteUrl = normaliseUrl(row.url);
       const ownerEmail = normaliseEmail(row.email);
+      const ownerName = String(row.name || '').trim() || null;
+      const preferredSiteName = String(row.siteName || '').trim() || null;
 
       if (!siteUrl) {
         results.skipped++;
@@ -208,6 +220,8 @@ router.post('/', requireAdmin, upload.single('file'), async (req, res, next) => 
           await supabase
             .from('sites')
             .update({
+              owner_name: ownerName || undefined,
+              name: preferredSiteName || undefined,
               owner_email: ownerEmail,
               facebook_url: normaliseOptionalUrl(row.facebook) || undefined,
               instagram_url: normaliseOptionalUrl(row.instagram) || undefined,
@@ -221,7 +235,8 @@ router.post('/', requireAdmin, upload.single('file'), async (req, res, next) => 
             .insert({
               user_id: null,
               url: siteUrl,
-              name: new URL(siteUrl).hostname,
+              name: preferredSiteName || new URL(siteUrl).hostname,
+              owner_name: ownerName,
               owner_email: ownerEmail,
               pages_to_scan: 1,
               type: 'admin',
