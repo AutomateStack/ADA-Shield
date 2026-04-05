@@ -1,5 +1,6 @@
 const { supabase } = require('./supabase');
 const { logger } = require('../utils/logger');
+const { calculateLeadScore, getLeadStatus } = require('../services/outreach-tracking');
 
 // ── Overview Stats ──────────────────────────────────────────────────
 
@@ -493,7 +494,7 @@ async function getLatestSiteScanSummary(siteId) {
   try {
     const { data, error } = await supabase
       .from('scan_results')
-      .select('id, scanned_at, total_violations, critical_count, serious_count, risk_score, violations')
+      .select('id, public_token, scanned_at, total_violations, critical_count, serious_count, risk_score, violations')
       .eq('site_id', siteId)
       .order('scanned_at', { ascending: false })
       .limit(1)
@@ -552,6 +553,18 @@ async function createSiteContactHistoryEntry({
   deliveryChannel,
   deliveryStatus = 'sent',
   providerMessageId = null,
+  sendBatchId = null,
+  parentContactHistoryId = null,
+  scanId = null,
+  reportUrl = null,
+  trackedReportUrl = null,
+  trackingPixelUrl = null,
+  automationEnabled = true,
+  followUpStatus = 'none',
+  followUpRule = null,
+  followUpScheduledFor = null,
+  followUpAttempts = 0,
+  trackingToken = null,
 }) {
   try {
     const { data, error } = await supabase
@@ -565,6 +578,18 @@ async function createSiteContactHistoryEntry({
         delivery_channel: deliveryChannel || null,
         delivery_status: deliveryStatus,
         provider_message_id: providerMessageId,
+        send_batch_id: sendBatchId,
+        parent_contact_history_id: parentContactHistoryId,
+        scan_id: scanId,
+        report_url: reportUrl,
+        tracked_report_url: trackedReportUrl,
+        tracking_pixel_url: trackingPixelUrl,
+        automation_enabled: automationEnabled,
+        follow_up_status: followUpStatus,
+        follow_up_rule: followUpRule,
+        follow_up_scheduled_for: followUpScheduledFor,
+        follow_up_attempts: followUpAttempts,
+        tracking_token: trackingToken,
       })
       .select('*')
       .single();
@@ -579,6 +604,160 @@ async function createSiteContactHistoryEntry({
     });
     throw error;
   }
+}
+
+async function updateSiteContactHistoryEntry(contactHistoryId, patch) {
+  try {
+    const { data, error } = await supabase
+      .from('site_contact_history')
+      .update(patch)
+      .eq('id', contactHistoryId)
+      .select('*')
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    logger.error('Failed to update site contact history entry', {
+      contactHistoryId,
+      error: error.message,
+    });
+    throw error;
+  }
+}
+
+async function getSiteContactHistoryEntryById(contactHistoryId) {
+  try {
+    const { data, error } = await supabase
+      .from('site_contact_history')
+      .select('*')
+      .eq('id', contactHistoryId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw error;
+    return data || null;
+  } catch (error) {
+    logger.error('Failed to get site contact history entry by ID', {
+      contactHistoryId,
+      error: error.message,
+    });
+    throw error;
+  }
+}
+
+async function getSiteContactHistoryEntryByTrackingToken(trackingToken) {
+  try {
+    const { data, error } = await supabase
+      .from('site_contact_history')
+      .select('*')
+      .eq('tracking_token', trackingToken)
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw error;
+    return data || null;
+  } catch (error) {
+    logger.error('Failed to get site contact history entry by tracking token', {
+      trackingToken,
+      error: error.message,
+    });
+    throw error;
+  }
+}
+
+async function createSiteContactEvent({
+  siteId,
+  contactHistoryId,
+  eventType,
+  url = null,
+  metadata = {},
+  userAgent = null,
+  ipAddressHash = null,
+}) {
+  try {
+    const { data, error } = await supabase
+      .from('site_contact_events')
+      .insert({
+        site_id: siteId,
+        contact_history_id: contactHistoryId,
+        event_type: eventType,
+        url,
+        metadata: metadata || {},
+        user_agent: userAgent,
+        ip_address_hash: ipAddressHash,
+      })
+      .select('*')
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    logger.error('Failed to create site contact event', {
+      siteId,
+      contactHistoryId,
+      eventType,
+      error: error.message,
+    });
+    throw error;
+  }
+}
+
+async function recordSiteContactEngagement({
+  trackingToken,
+  eventType,
+  url = null,
+  metadata = {},
+  userAgent = null,
+  ipAddressHash = null,
+}) {
+  const contact = await getSiteContactHistoryEntryByTrackingToken(trackingToken);
+  if (!contact) return null;
+
+  const now = new Date().toISOString();
+  const nextContact = {
+    ...contact,
+    last_engagement_at: now,
+    last_event_type: eventType,
+  };
+
+  if (eventType === 'open') {
+    nextContact.opens_count = Number(contact.opens_count || 0) + 1;
+    nextContact.first_opened_at = contact.first_opened_at || now;
+    nextContact.last_opened_at = now;
+  }
+
+  if (eventType === 'click') {
+    nextContact.clicks_count = Number(contact.clicks_count || 0) + 1;
+    nextContact.first_clicked_at = contact.first_clicked_at || now;
+    nextContact.last_clicked_at = now;
+    nextContact.last_clicked_url = url || contact.last_clicked_url || null;
+  }
+
+  nextContact.lead_score = calculateLeadScore(nextContact);
+  nextContact.lead_status = getLeadStatus(nextContact.lead_score);
+
+  await createSiteContactEvent({
+    siteId: contact.site_id,
+    contactHistoryId: contact.id,
+    eventType,
+    url,
+    metadata,
+    userAgent,
+    ipAddressHash,
+  });
+
+  return updateSiteContactHistoryEntry(contact.id, {
+    opens_count: nextContact.opens_count,
+    clicks_count: nextContact.clicks_count,
+    first_opened_at: nextContact.first_opened_at,
+    last_opened_at: nextContact.last_opened_at,
+    first_clicked_at: nextContact.first_clicked_at,
+    last_clicked_at: nextContact.last_clicked_at,
+    last_clicked_url: nextContact.last_clicked_url,
+    last_engagement_at: nextContact.last_engagement_at,
+    last_event_type: nextContact.last_event_type,
+    lead_score: nextContact.lead_score,
+    lead_status: nextContact.lead_status,
+  });
 }
 
 /**
@@ -608,6 +787,132 @@ async function getSiteContactHistory(siteId, { page = 1, limit = 20 } = {}) {
   }
 }
 
+async function getSiteContactEvents(siteId, { limit = 50 } = {}) {
+  try {
+    const { data, error } = await supabase
+      .from('site_contact_events')
+      .select('*')
+      .eq('site_id', siteId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    logger.error('Failed to get site contact events', { siteId, error: error.message });
+    throw error;
+  }
+}
+
+function summarizeContactEntries(entries) {
+  const sentCount = entries.filter((entry) => entry.delivery_status === 'sent').length;
+  const openedCount = entries.filter((entry) => Number(entry.opens_count || 0) > 0).length;
+  const clickedCount = entries.filter((entry) => Number(entry.clicks_count || 0) > 0).length;
+  const hotLeadCount = entries.filter((entry) => entry.lead_status === 'hot').length;
+  const followUpsScheduled = entries.filter((entry) => entry.follow_up_status === 'scheduled').length;
+
+  return {
+    sentCount,
+    openedCount,
+    clickedCount,
+    openRate: sentCount > 0 ? Math.round((openedCount / sentCount) * 100) : 0,
+    clickRate: sentCount > 0 ? Math.round((clickedCount / sentCount) * 100) : 0,
+    hotLeadCount,
+    followUpsScheduled,
+  };
+}
+
+async function getSiteOutreachAnalytics(siteId) {
+  try {
+    const [site, history, events] = await Promise.all([
+      getSiteById(siteId),
+      supabase
+        .from('site_contact_history')
+        .select('*')
+        .eq('site_id', siteId)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('site_contact_events')
+        .select('*')
+        .eq('site_id', siteId)
+        .order('created_at', { ascending: false })
+        .limit(100),
+    ]);
+
+    if (history.error) throw history.error;
+    if (events.error) throw events.error;
+
+    const entries = history.data || [];
+    const summary = summarizeContactEntries(entries);
+    const topLead = [...entries].sort((a, b) => (b.lead_score || 0) - (a.lead_score || 0))[0] || null;
+
+    return {
+      site,
+      summary: {
+        ...summary,
+        topLeadScore: topLead?.lead_score || 0,
+        topLeadStatus: topLead?.lead_status || 'cold',
+        lastEngagementAt: topLead?.last_engagement_at || null,
+      },
+      entries,
+      events: events.data || [],
+    };
+  } catch (error) {
+    logger.error('Failed to get site outreach analytics', { siteId, error: error.message });
+    throw error;
+  }
+}
+
+async function getOutreachOverview({ limit = 10 } = {}) {
+  try {
+    const [historyResult, eventsResult] = await Promise.all([
+      supabase
+        .from('site_contact_history')
+        .select('id, site_id, recipient_email, subject, delivery_status, created_at, opens_count, clicks_count, lead_score, lead_status, follow_up_status, follow_up_scheduled_for, last_engagement_at, sites(name, url)')
+        .order('created_at', { ascending: false })
+        .limit(250),
+      supabase
+        .from('site_contact_events')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(30),
+    ]);
+
+    if (historyResult.error) throw historyResult.error;
+    if (eventsResult.error) throw eventsResult.error;
+
+    const entries = historyResult.data || [];
+    const summary = summarizeContactEntries(entries);
+    const topLeads = [...entries]
+      .sort((a, b) => (b.lead_score || 0) - (a.lead_score || 0))
+      .slice(0, limit)
+      .map((entry) => ({
+        id: entry.id,
+        siteId: entry.site_id,
+        recipientEmail: entry.recipient_email,
+        subject: entry.subject,
+        leadScore: entry.lead_score,
+        leadStatus: entry.lead_status,
+        opensCount: entry.opens_count,
+        clicksCount: entry.clicks_count,
+        lastEngagementAt: entry.last_engagement_at,
+        followUpStatus: entry.follow_up_status,
+        followUpScheduledFor: entry.follow_up_scheduled_for,
+        siteName: entry.sites?.name || null,
+        siteUrl: entry.sites?.url || null,
+      }));
+
+    return {
+      summary,
+      topLeads,
+      recentEvents: eventsResult.data || [],
+    };
+  } catch (error) {
+    logger.error('Failed to get outreach overview', { error: error.message });
+    throw error;
+  }
+}
+
 module.exports = {
   getAdminStats,
   getAdminScans,
@@ -621,5 +926,13 @@ module.exports = {
   getLatestSiteScanSummary,
   markSiteAsContacted,
   createSiteContactHistoryEntry,
+  updateSiteContactHistoryEntry,
+  getSiteContactHistoryEntryById,
+  getSiteContactHistoryEntryByTrackingToken,
+  createSiteContactEvent,
+  recordSiteContactEngagement,
   getSiteContactHistory,
+  getSiteContactEvents,
+  getSiteOutreachAnalytics,
+  getOutreachOverview,
 };

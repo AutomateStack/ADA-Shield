@@ -16,18 +16,27 @@ const {
   getLatestSiteScanSummary,
   markSiteAsContacted,
   createSiteContactHistoryEntry,
+  updateSiteContactHistoryEntry,
+  createSiteContactEvent,
   getSiteContactHistory,
+  getSiteOutreachAnalytics,
+  getOutreachOverview,
 } = require('../db/admin');
 const { saveScanResult, updateSiteLastScanned } = require('../db/scans');
 const { createOrUpdateFreeScanSite } = require('../db/sites');
 const { invokeSupabaseFunction } = require('../services/supabase-functions');
 const { sendEmail, detectIndustry, getIndustryContext } = require('../services/email');
+const { scheduleFollowUp } = require('../services/outreach-queue');
+const {
+  buildTrackingUrls,
+  buildTrackedEmailHtml,
+  injectTrackedLink,
+  buildReportUrl,
+} = require('../services/outreach-tracking');
 
 const router = Router();
 
-const FIXED_ADMIN_CC_RECIPIENTS = [
-  'tthirmal@gmail.com',
-];
+const FIXED_ADMIN_CC_RECIPIENTS = [];
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ADMIN_CACHE_TTL_MS = Math.max(1000, parseInt(process.env.ADMIN_CACHE_TTL_MS || '30000', 10) || 30000);
@@ -277,6 +286,7 @@ router.patch('/sites/:siteId', async (req, res, next) => {
     }
 
     const updated = await updateAdminSiteMetadata(req.params.siteId, patch);
+    adminReadCache.clear();
     return res.json({ site: updated });
   } catch (error) {
     next(error);
@@ -582,8 +592,7 @@ function buildTopIssuesSummary(violations, dashboardUrl) {
   };
 }
 
-function buildEmailTemplates({ firstName, siteName, issueText, riskScore, industry, topIssuesSummary }) {
-  const dashboardUrl = process.env.DASHBOARD_URL || 'https://ada-shield-dashboard.vercel.app';
+function buildEmailTemplates({ firstName, riskScore, reportUrl }) {
   const riskScoreText = Number.isFinite(riskScore) ? `${riskScore}/100` : 'elevated';
 
   const templates = {
@@ -596,7 +605,7 @@ I ran a quick accessibility check on your website and your risk score came out q
 A few issues (like text contrast and missing labels) could make parts of your site difficult to use and potentially expose you to ADA-related complaints.
 
 I’ve put together a short report showing the exact fixes:
-${dashboardUrl}
+${reportUrl}
 
 No pressure, just sharing in case it helps you address this early.
 
@@ -612,7 +621,7 @@ I was reviewing your website and noticed a few accessibility improvements that c
 Things like color contrast and image descriptions can impact how easily people navigate your site.
 
 I created a quick, free report with suggestions:
-${dashboardUrl}
+${reportUrl}
 
 Even small fixes here can make a noticeable difference.
 
@@ -626,7 +635,7 @@ ADA Shield`,
 I ran a quick accessibility scan on your website and found a couple of minor things you might want to review.
 
 Here’s a short report:
-${dashboardUrl}
+${reportUrl}
 
 Thought I’d share, it’s free.
 
@@ -651,17 +660,12 @@ router.get('/sites/:siteId/email-template', async (req, res, next) => {
     const issueCount = Number.isFinite(latestScan?.total_violations)
       ? latestScan.total_violations
       : 0;
-    const issueText = issueCount > 0 ? String(issueCount) : 'multiple';
     const industry = detectIndustry(site.url);
-    const dashboardUrl = process.env.DASHBOARD_URL || 'https://ada-shield-dashboard.vercel.app';
-    const { summaryText: topIssuesSummary } = buildTopIssuesSummary(latestScan?.violations || [], dashboardUrl);
+    const reportUrl = buildReportUrl(latestScan?.public_token || null);
     const templates = buildEmailTemplates({
       firstName,
-      siteName,
-      issueText,
       riskScore: latestScan?.risk_score,
-      industry,
-      topIssuesSummary,
+      reportUrl,
     });
 
     const defaultStyle = pickDefaultTemplateStyle(latestScan?.risk_score);
@@ -687,6 +691,7 @@ router.get('/sites/:siteId/email-template', async (req, res, next) => {
         industryLabel: formatIndustryLabel(industry),
         issueCount: issueCount > 0 ? issueCount : null,
         riskScore: latestScan?.risk_score ?? null,
+        reportUrl,
       },
     });
   } catch (error) {
@@ -708,17 +713,14 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
     if (!site) {
       return res.status(404).json({ error: 'Site not found' });
     }
+    if (!site.owner_email && (!site.notification_recipients || !site.notification_recipients.length)) {
+      return res.status(400).json({ error: 'Site has no owner email address and no notification recipients' });
+    }
 
+    const latestScan = await getLatestSiteScanSummary(req.params.siteId);
+    const reportUrl = buildReportUrl(latestScan?.public_token || null);
+    const sendBatchId = crypto.randomUUID();
 
-      // Allow sending without owner_email when extra recipients exist
-      if (!site.owner_email && (!site.notification_recipients || !site.notification_recipients.length)) {
-        return res.status(400).json({ error: 'Site has no owner email address and no notification recipients' });
-      }
-
-    let deliveryChannel = 'supabase-function';
-    let providerMessageId = null;
-
-    // Collect all site-related recipients for TO list (owner + notification recipients)
     const toRecipients = new Set();
     if (site.owner_email) toRecipients.add(site.owner_email);
     if (site.notification_recipients && Array.isArray(site.notification_recipients)) {
@@ -729,71 +731,154 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
       return res.status(400).json({ error: 'No recipient emails configured for this site' });
     }
 
-    // Fixed admin CC (only thermal for monitoring)
     const ccRecipients = FIXED_ADMIN_CC_RECIPIENTS;
     const toList = Array.from(toRecipients);
 
-    // Primary path: Supabase Edge Function (Resend)
-    // Fallback path: direct API-side sendEmail if function call fails.
-    try {
-      const response = await invokeSupabaseFunction('send-admin-email', {
-        to: toList,
-        cc: ccRecipients.length > 0 ? ccRecipients : undefined,
+    const sentResults = [];
+    const failures = [];
+
+    for (let index = 0; index < toList.length; index += 1) {
+      const recipient = toList[index];
+      const trackingToken = crypto.randomUUID();
+      const trackingUrls = buildTrackingUrls(trackingToken, reportUrl);
+      const trackedText = injectTrackedLink(parsed.data.message, trackingUrls.trackedReportUrl);
+      const trackedHtml = buildTrackedEmailHtml({
         subject: parsed.data.subject,
         message: parsed.data.message,
-        siteId: site.id,
-        siteName: site.name,
+        siteName: site.name || site.url,
         siteUrl: site.url,
+        trackedReportUrl: trackingUrls.trackedReportUrl,
+        trackingPixelUrl: trackingUrls.trackingPixelUrl,
       });
-      providerMessageId = response?.messageId || null;
-    } catch (edgeError) {
-      logger.warn('Edge function send failed, using local email fallback', {
+
+      const contactEntry = await createSiteContactHistoryEntry({
         siteId: site.id,
-        to: toList.join(','),
-        cc: ccRecipients,
-        error: edgeError.message,
+        recipientEmail: recipient,
+        subject: parsed.data.subject,
+        message: trackedText,
+        templateStyle: parsed.data.templateStyle || null,
+        deliveryChannel: 'supabase-function',
+        deliveryStatus: 'sent',
+        providerMessageId: null,
+        sendBatchId,
+        scanId: latestScan?.id || null,
+        reportUrl: trackingUrls.reportUrl,
+        trackedReportUrl: trackingUrls.trackedReportUrl,
+        trackingPixelUrl: trackingUrls.trackingPixelUrl,
+        automationEnabled: true,
+        trackingToken,
       });
+
+      let deliveryChannel = 'supabase-function';
+      let providerMessageId = null;
 
       try {
-        deliveryChannel = 'api-fallback';
-        const fallbackResponse = await sendEmail({
-          to: toList,
+        const response = await invokeSupabaseFunction('send-admin-email', {
+          to: [recipient],
+          cc: index === 0 && ccRecipients.length > 0 ? ccRecipients : undefined,
           subject: parsed.data.subject,
-          text: parsed.data.message,
-          cc: ccRecipients,
+          message: trackedText,
+          text: trackedText,
+          html: trackedHtml,
+          siteId: site.id,
+          siteName: site.name,
+          siteUrl: site.url,
         });
-        providerMessageId = fallbackResponse?.id || null;
-      } catch (fallbackError) {
-        const providerMessage = fallbackError?.message || edgeError?.message || 'Failed to send email';
-        const userMessage = getEmailSendFailureMessage(providerMessage);
+        providerMessageId = response?.messageId || null;
+      } catch (edgeError) {
+        logger.warn('Edge function send failed, using local email fallback', {
+          siteId: site.id,
+          recipient,
+          error: edgeError.message,
+        });
 
-        return res.status(400).json({
-          error: userMessage,
-          details: providerMessage,
-             recipient: toList.join(','),
+        try {
+          deliveryChannel = 'api-fallback';
+          const fallbackResponse = await sendEmail({
+            to: [recipient],
+            subject: parsed.data.subject,
+            text: trackedText,
+            html: trackedHtml,
+            cc: index === 0 ? ccRecipients : undefined,
+          });
+          providerMessageId = fallbackResponse?.id || null;
+        } catch (fallbackError) {
+          const providerMessage = fallbackError?.message || edgeError?.message || 'Failed to send email';
+          await updateSiteContactHistoryEntry(contactEntry.id, {
+            delivery_status: 'failed',
+            delivery_channel: deliveryChannel,
+            follow_up_status: 'canceled',
+          });
+          failures.push({ recipient, message: providerMessage });
+          continue;
+        }
+      }
+
+      await updateSiteContactHistoryEntry(contactEntry.id, {
+        delivery_channel: deliveryChannel,
+        provider_message_id: providerMessageId,
+      });
+
+      await createSiteContactEvent({
+        siteId: site.id,
+        contactHistoryId: contactEntry.id,
+        eventType: 'sent',
+        metadata: {
+          automated: false,
+          sendBatchId,
+          recipient,
+        },
+      });
+
+      const scheduled = await scheduleFollowUp({
+        contactHistoryId: contactEntry.id,
+        rule: 'no_open',
+        delayMs: 72 * 60 * 60 * 1000,
+      });
+
+      if (scheduled) {
+        await updateSiteContactHistoryEntry(contactEntry.id, {
+          follow_up_status: 'scheduled',
+          follow_up_rule: 'no_open',
+          follow_up_scheduled_for: scheduled.scheduledFor,
+        });
+
+        await createSiteContactEvent({
+          siteId: site.id,
+          contactHistoryId: contactEntry.id,
+          eventType: 'follow_up_scheduled',
+          metadata: {
+            rule: 'no_open',
+            scheduledFor: scheduled.scheduledFor,
+          },
         });
       }
+
+      sentResults.push({
+        recipient,
+        contactHistoryId: contactEntry.id,
+        deliveryChannel,
+        providerMessageId,
+      });
     }
 
-    // Log the first recipient for contact history
-    const firstToRecipient = Array.from(toRecipients)[0];
-    await createSiteContactHistoryEntry({
-      siteId: site.id,
-         recipientEmail: firstToRecipient,
-      subject: parsed.data.subject,
-      message: parsed.data.message,
-      templateStyle: parsed.data.templateStyle || null,
-      deliveryChannel,
-      deliveryStatus: 'sent',
-      providerMessageId,
-    });
+    if (sentResults.length === 0) {
+      const providerMessage = failures[0]?.message || 'Failed to send email';
+      return res.status(400).json({
+        error: getEmailSendFailureMessage(providerMessage),
+        details: providerMessage,
+      });
+    }
 
-    // Mark site as contacted
     await markSiteAsContacted(req.params.siteId);
+    adminReadCache.clear();
 
-    return res.json({ 
-      success: true, 
-      message: 'Email sent and contact recorded' 
+    return res.json({
+      success: true,
+      message: failures.length > 0 ? 'Emails sent with some delivery failures' : 'Emails sent and tracking enabled',
+      sentCount: sentResults.length,
+      failedCount: failures.length,
+      failures,
     });
   } catch (error) {
     next(error);
@@ -820,6 +905,31 @@ router.get('/sites/:siteId/contact-history', async (req, res, next) => {
       },
       ...result,
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/sites/:siteId/outreach-analytics', async (req, res, next) => {
+  try {
+    const site = await getSiteById(req.params.siteId);
+    if (!site) {
+      return res.status(404).json({ error: 'Site not found' });
+    }
+
+    const analytics = await getSiteOutreachAnalytics(req.params.siteId);
+    return res.json(analytics);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/outreach/overview', async (req, res, next) => {
+  try {
+    const limit = Math.min(20, Math.max(1, parseInt(req.query.limit, 10) || 10));
+    const cacheKey = `outreach-overview:${limit}`;
+    const result = await getCachedAdminValue(cacheKey, () => getOutreachOverview({ limit }));
+    return res.json(result);
   } catch (error) {
     next(error);
   }

@@ -488,7 +488,7 @@ async function sendWeeklySummaryEmail({ to, sites, dashboardUrl }) {
 /**
  * Sends a generic email (used for admin outreach).
  */
-async function sendEmail({ to, subject, text, cc, from = EMAIL_FROM }) {
+async function sendEmail({ to, subject, text, html, cc, from = EMAIL_FROM }) {
   const resend = getResendClient();
   if (!resend) {
     logger.warn('Resend not configured — skipping email');
@@ -505,7 +505,7 @@ async function sendEmail({ to, subject, text, cc, from = EMAIL_FROM }) {
       to,
       subject: sanitizedSubject,
       text,
-      html: `
+      html: html || `
 <!DOCTYPE html>
 <html lang="en">
 <head>
