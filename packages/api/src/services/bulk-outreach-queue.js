@@ -23,6 +23,7 @@ const { supabase } = require('../db/supabase');
 const {
   getSiteById,
   getLatestSiteScanSummary,
+  markSiteAsContacted,
   createSiteContactHistoryEntry,
   updateSiteContactHistoryEntry,
 } = require('../db/admin');
@@ -286,16 +287,22 @@ async function processOneSite(siteId, batchId) {
       : `Your free ADA accessibility report for ${siteName}`;
 
   const violationCount = (scanData.violations || []).length;
-  const message = `Hi there,
+  const industryRiskContext = industryCtx?.riskContext || '';
+  const industryActionContext = industryCtx?.callSignal || '';
+  const message = `Hello,
 
 I scanned ${siteName} and found ${violationCount} accessibility issue${violationCount !== 1 ? 's' : ''} that could expose you to ADA lawsuits.
 
 Your risk score: ${riskScore}/100${riskScore >= 70 ? ' — HIGH RISK' : riskScore >= 40 ? ' — MEDIUM RISK' : ' — LOW RISK'}.
 
-${industryCtx ? `${industryCtx}\n\n` : ''}View your full free report with specific code fixes below.
+${industryRiskContext ? `${industryRiskContext}\n\n` : ''}${industryActionContext ? `${industryActionContext}\n\n` : ''}View your full free report with specific code fixes below.
+Here is your generated report: ${reportUrl}
 
+Thank you,
 Thirmal
-ADA Shield`;
+ADA Shield
+
+`;
 
   const sentRecipients = [];
 
@@ -397,11 +404,10 @@ ADA Shield`;
     logger.info('Bulk: email sent', { siteId, recipient });
   }
 
-  // Update site contacted_at
-  await supabase
-    .from('sites')
-    .update({ last_contacted_at: new Date().toISOString() })
-    .eq('id', site.id);
+  // Keep Sites admin counts aligned with manual send flow.
+  if (sentRecipients.length > 0) {
+    await markSiteAsContacted(site.id);
+  }
 
   return { siteId, scanned: true, emailed: sentRecipients.length > 0, recipients: sentRecipients };
 }
