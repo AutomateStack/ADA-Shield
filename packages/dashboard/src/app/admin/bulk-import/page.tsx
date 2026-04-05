@@ -177,6 +177,8 @@ export default function AdminBulkImportPage() {
             <div className="text-xs text-slate-500 mt-1">
               Required columns: <span className="text-slate-300">Site URL</span>,{' '}
               <span className="text-slate-300">Email</span> — Optional:{' '}
+              <span className="text-slate-300">Name</span>,{' '}
+              <span className="text-slate-300">Site Name</span>,{' '}
               <span className="text-slate-300">Facebook URL</span>,{' '}
               <span className="text-slate-300">Instagram URL</span>,{' '}
               <span className="text-slate-300">Phone</span>
