@@ -17,9 +17,9 @@
  */
 
 const { Router } = require('express');
+const crypto = require('crypto');
 const multer = require('multer');
 const XLSX = require('xlsx');
-const { z } = require('zod');
 const { supabase } = require('../db/supabase');
 const { logger } = require('../utils/logger');
 const { enqueueBulkSite, getBulkQueue } = require('../services/bulk-outreach-queue');
@@ -44,9 +44,17 @@ const upload = multer({
 
 function requireAdmin(req, res, next) {
   const secret = req.headers['x-admin-secret'];
-  if (!secret || secret !== process.env.ADMIN_SECRET) {
-    return res.status(401).json({ error: 'Unauthorized' });
+  const expected = process.env.INTERNAL_API_SECRET;
+  if (!secret || !expected) {
+    return res.status(401).json({ error: 'Unauthorized — invalid admin secret' });
   }
+
+  const secretBuf = Buffer.from(String(secret));
+  const expectedBuf = Buffer.from(String(expected));
+  if (secretBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(secretBuf, expectedBuf)) {
+    return res.status(401).json({ error: 'Unauthorized — invalid admin secret' });
+  }
+
   next();
 }
 

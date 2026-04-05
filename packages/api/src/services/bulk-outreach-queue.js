@@ -195,7 +195,10 @@ ADA Shield`;
     const recipient = recipients[idx];
     const trackingToken = crypto.randomUUID();
     const trackingUrls = buildTrackingUrls(trackingToken, reportUrl);
-    const trackedText = injectTrackedLink(message, trackingUrls.trackedReportUrl);
+    const trackedText = injectTrackedLink(
+      message,
+      `Here is your generated report: ${trackingUrls.reportUrl}`
+    );
     const trackedHtml = buildTrackedEmailHtml({
       subject,
       message,
