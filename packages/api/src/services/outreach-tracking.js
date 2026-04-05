@@ -1,11 +1,59 @@
 const crypto = require('crypto');
 
-function getApiBaseUrl() {
-  return String(process.env.API_URL || 'http://localhost:4000').replace(/\/$/, '');
+function normalizeBaseUrl(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return null;
+
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.origin.replace(/\/$/, '');
+  } catch {
+    return null;
+  }
 }
 
-function getDashboardBaseUrl() {
-  return String(process.env.DASHBOARD_URL || 'http://localhost:3000').replace(/\/$/, '');
+function isLocalOrigin(origin) {
+  if (!origin) return false;
+  try {
+    const { hostname } = new URL(origin);
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  } catch {
+    return false;
+  }
+}
+
+function pickBaseUrl({ override, envKeys, fallback }) {
+  const normalizedOverride = normalizeBaseUrl(override);
+  if (normalizedOverride) return normalizedOverride;
+
+  const candidates = envKeys
+    .map((key) => normalizeBaseUrl(process.env[key]))
+    .filter(Boolean);
+
+  // Prefer a non-local origin if available (prevents localhost links in emails).
+  const nonLocal = candidates.find((origin) => !isLocalOrigin(origin));
+  if (nonLocal) return nonLocal;
+
+  const first = candidates[0];
+  if (first) return first;
+
+  return normalizeBaseUrl(fallback);
+}
+
+function getApiBaseUrl(options = {}) {
+  return pickBaseUrl({
+    override: options.apiBaseUrl,
+    envKeys: ['PUBLIC_API_URL', 'API_URL', 'NEXT_PUBLIC_API_URL'],
+    fallback: 'http://localhost:4000',
+  });
+}
+
+function getDashboardBaseUrl(options = {}) {
+  return pickBaseUrl({
+    override: options.dashboardBaseUrl,
+    envKeys: ['PUBLIC_DASHBOARD_URL', 'DASHBOARD_URL', 'NEXT_PUBLIC_DASHBOARD_URL'],
+    fallback: 'http://localhost:3000',
+  });
 }
 
 function escapeHtml(value) {
@@ -17,16 +65,17 @@ function escapeHtml(value) {
     .replace(/'/g, '&#x27;');
 }
 
-function buildReportUrl(publicToken) {
+function buildReportUrl(publicToken, options = {}) {
+  const dashboardBaseUrl = getDashboardBaseUrl(options);
   if (!publicToken) {
-    return getDashboardBaseUrl();
+    return dashboardBaseUrl;
   }
 
-  return `${getDashboardBaseUrl()}/report/${publicToken}`;
+  return `${dashboardBaseUrl}/report/${publicToken}`;
 }
 
-function buildTrackingUrls(trackingToken, reportUrl) {
-  const apiBaseUrl = getApiBaseUrl();
+function buildTrackingUrls(trackingToken, reportUrl, options = {}) {
+  const apiBaseUrl = getApiBaseUrl(options);
 
   return {
     reportUrl,

@@ -169,11 +169,15 @@ function initOutreachWorker() {
 
       const trackingToken = crypto.randomUUID();
       const trackingUrls = buildTrackingUrls(trackingToken, reportUrl);
+      const followUpText = injectTrackedLink(
+        followUp.message,
+        `Here is your generated report: ${trackingUrls.reportUrl}`
+      );
       const followUpEntry = await createSiteContactHistoryEntry({
         siteId: contact.site_id,
         recipientEmail: contact.recipient_email,
         subject: followUp.subject,
-        message: injectTrackedLink(followUp.message, trackingUrls.trackedReportUrl),
+        message: followUpText,
         templateStyle: contact.template_style,
         deliveryChannel: 'api-fallback',
         deliveryStatus: 'sent',
@@ -199,7 +203,7 @@ function initOutreachWorker() {
       const response = await sendEmail({
         to: [contact.recipient_email],
         subject: followUp.subject,
-        text: injectTrackedLink(followUp.message, trackingUrls.trackedReportUrl),
+        text: followUpText,
         html,
       });
 

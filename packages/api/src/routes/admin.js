@@ -58,6 +58,17 @@ function getCachedAdminValue(cacheKey, loader) {
   });
 }
 
+function getRequestOrigins(req) {
+  const dashboardOrigin = String(req.headers.origin || '').trim();
+  const requestHost = String(req.get('host') || '').trim();
+  const apiOrigin = requestHost ? `${req.protocol}://${requestHost}` : '';
+
+  return {
+    dashboardOrigin,
+    apiOrigin,
+  };
+}
+
 /**
  * Admin auth middleware — validates INTERNAL_API_SECRET header.
  * Uses timing-safe comparison to prevent timing attacks.
@@ -649,6 +660,7 @@ ADA Shield`,
 
 router.get('/sites/:siteId/email-template', async (req, res, next) => {
   try {
+    const { dashboardOrigin } = getRequestOrigins(req);
     const site = await getSiteById(req.params.siteId);
     if (!site) {
       return res.status(404).json({ error: 'Site not found' });
@@ -661,7 +673,9 @@ router.get('/sites/:siteId/email-template', async (req, res, next) => {
       ? latestScan.total_violations
       : 0;
     const industry = detectIndustry(site.url);
-    const reportUrl = buildReportUrl(latestScan?.public_token || null);
+    const reportUrl = buildReportUrl(latestScan?.public_token || null, {
+      dashboardBaseUrl: dashboardOrigin,
+    });
     const templates = buildEmailTemplates({
       firstName,
       riskScore: latestScan?.risk_score,
@@ -701,6 +715,7 @@ router.get('/sites/:siteId/email-template', async (req, res, next) => {
 
 router.post('/sites/:siteId/send-email', async (req, res, next) => {
   try {
+    const { dashboardOrigin, apiOrigin } = getRequestOrigins(req);
     const parsed = sendEmailSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({
@@ -718,7 +733,9 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
     }
 
     const latestScan = await getLatestSiteScanSummary(req.params.siteId);
-    const reportUrl = buildReportUrl(latestScan?.public_token || null);
+    const reportUrl = buildReportUrl(latestScan?.public_token || null, {
+      dashboardBaseUrl: dashboardOrigin,
+    });
     const sendBatchId = crypto.randomUUID();
 
     const toRecipients = new Set();
@@ -740,8 +757,13 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
     for (let index = 0; index < toList.length; index += 1) {
       const recipient = toList[index];
       const trackingToken = crypto.randomUUID();
-      const trackingUrls = buildTrackingUrls(trackingToken, reportUrl);
-      const trackedText = injectTrackedLink(parsed.data.message, trackingUrls.trackedReportUrl);
+      const trackingUrls = buildTrackingUrls(trackingToken, reportUrl, {
+        apiBaseUrl: apiOrigin,
+      });
+      const trackedText = injectTrackedLink(
+        parsed.data.message,
+        `Here is your generated report: ${trackingUrls.reportUrl}`
+      );
       const trackedHtml = buildTrackedEmailHtml({
         subject: parsed.data.subject,
         message: parsed.data.message,
