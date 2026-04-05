@@ -583,90 +583,52 @@ function buildTopIssuesSummary(violations, dashboardUrl) {
 }
 
 function buildEmailTemplates({ firstName, siteName, issueText, riskScore, industry, topIssuesSummary }) {
-  const dashboardUrl = 'https://ada-shield-dashboard.vercel.app';
-  const supportLine = 'If you have any questions, you can reach me at tthirmal@gmail.com.';
+  const dashboardUrl = process.env.DASHBOARD_URL || 'https://ada-shield-dashboard.vercel.app';
   const riskScoreText = Number.isFinite(riskScore) ? `${riskScore}/100` : 'elevated';
-  const { riskContext, callSignal } = getIndustryContext(industry);
-  const yearlyStats = getIndustryYearlyStatistics(industry);
 
   const templates = {
     fear_urgency: {
-      subject: `[noreply] ${siteName}: accessibility risk alert`,
+  subject: 'Quick heads-up about your website',
       message: `Hi ${firstName},
 
-I ran an ADA accessibility check for ${siteName} and found ${issueText} issues that can increase legal risk.
+I ran a quick accessibility check on your website and your risk score came out quite high (${riskScoreText}).
 
-Risk signal: ${riskScoreText}
-${yearlyStats}
+A few issues (like text contrast and missing labels) could make parts of your site difficult to use and potentially expose you to ADA-related complaints.
 
-Top 2 issues found (simple):
-${topIssuesSummary}
+I’ve put together a short report showing the exact fixes:
+${dashboardUrl}
 
-Why this matters:
-${riskContext}
-
-Recommended action:
-${callSignal}
-
-ADA Shield gives you:
-- 0-100 lawsuit risk score
-- Exact fix suggestions for each issue
-
-Run a fresh scan: ${dashboardUrl}
-
-${supportLine}
+No pressure, just sharing in case it helps you address this early.
 
 Thirmal
 ADA Shield`,
     },
     friendly_educational: {
-      subject: `[noreply] Quick accessibility snapshot for ${siteName}`,
+  subject: 'Small improvement opportunity for your website',
       message: `Hi ${firstName},
 
-I reviewed ${siteName} and found ${issueText} accessibility items worth fixing.
+I was reviewing your website and noticed a few accessibility improvements that could enhance user experience.
 
-${yearlyStats}
+Things like color contrast and image descriptions can impact how easily people navigate your site.
 
-Top 2 issues found (simple):
-${topIssuesSummary}
+I created a quick, free report with suggestions:
+${dashboardUrl}
 
-Accessibility improvements help reduce legal exposure and improve user experience for all visitors.
-
-Context:
-${riskContext}
-
-ADA Shield can help with:
-- 0-100 risk scoring
-- Prioritized, code-level fixes
-
-Run your scan here: ${dashboardUrl}
-
-${supportLine}
+Even small fixes here can make a noticeable difference.
 
 Thirmal
 ADA Shield`,
     },
     concise_direct: {
-      subject: `[noreply] ${siteName}: ADA risk snapshot`,
+  subject: 'Quick check on your website',
       message: `Hi ${firstName},
 
-I scanned ${siteName} and found ${issueText} ADA-related issues.
+I ran a quick accessibility scan on your website and found a couple of minor things you might want to review.
 
-Risk signal: ${riskScoreText}
-${yearlyStats}
+Here’s a short report:
+${dashboardUrl}
 
-Top 2 issues found (simple):
-${topIssuesSummary}
-
-Why this matters:
-${riskContext}
-
-Next step:
-${callSignal}
-
-Free scan: ${dashboardUrl}
-
-${supportLine}
+Thought I’d share, it’s free.
 
 Thirmal
 ADA Shield`,
@@ -691,7 +653,7 @@ router.get('/sites/:siteId/email-template', async (req, res, next) => {
       : 0;
     const issueText = issueCount > 0 ? String(issueCount) : 'multiple';
     const industry = detectIndustry(site.url);
-    const dashboardUrl = 'https://ada-shield-dashboard.vercel.app';
+    const dashboardUrl = process.env.DASHBOARD_URL || 'https://ada-shield-dashboard.vercel.app';
     const { summaryText: topIssuesSummary } = buildTopIssuesSummary(latestScan?.violations || [], dashboardUrl);
     const templates = buildEmailTemplates({
       firstName,
