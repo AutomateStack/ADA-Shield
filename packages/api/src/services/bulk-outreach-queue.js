@@ -7,16 +7,16 @@
  *   3. Sends a tracked outreach email.
  *   4. Records contact history with tracking tokens.
  *
- * Daily cap: only 2 sites are processed per day, enforced by the
- * 'daily-bulk-trigger' repeatable job that enqueues at most 2 pending
- * sites each morning.
+ * Daily cap: admin-configurable sites/day, enforced by the
+ * 'daily-bulk-trigger' repeatable job that enqueues up to the saved
+ * pending-site limit each morning.
  *
  * All operations are read-only wrappers around existing helpers to avoid
  * duplicating business logic.
  */
 
 const crypto = require('crypto');
-const { Queue, Worker, QueueScheduler } = require('bullmq');
+const { Queue, Worker } = require('bullmq');
 const { scanPage, calculateRiskScore } = require('@ada-shield/scanner');
 const { saveScanResult } = require('../db/scans');
 const { supabase } = require('../db/supabase');
@@ -38,7 +38,9 @@ const {
 const { logger } = require('../utils/logger');
 
 const BULK_QUEUE_NAME = 'bulk-outreach';
-const DAILY_LIMIT = 2; // max sites processed per day
+const DEFAULT_DAILY_LIMIT = 2;
+const SETTINGS_TABLE = 'bulk_import_settings';
+const SETTINGS_ROW_ID = 'global';
 
 let bulkQueue = null;
 let bulkWorker = null;
@@ -62,6 +64,96 @@ function parseRedisUrl(redisUrl) {
 
 function getBulkQueue() {
   return bulkQueue;
+}
+
+function isMissingSettingsSchemaError(error) {
+  const code = String(error?.code || '').trim();
+  const message = String(error?.message || '').toLowerCase();
+  return code === '42P01' || code === '42703' || message.includes(SETTINGS_TABLE);
+}
+
+function sanitizeDailyLimit(value) {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  if (!Number.isFinite(parsed)) return DEFAULT_DAILY_LIMIT;
+  return Math.min(Math.max(parsed, 1), 100);
+}
+
+async function getBulkDailyLimit() {
+  const { data, error } = await supabase
+    .from(SETTINGS_TABLE)
+    .select('daily_limit')
+    .eq('id', SETTINGS_ROW_ID)
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingSettingsSchemaError(error)) {
+      logger.warn('Bulk settings table missing, using default daily limit', { defaultDailyLimit: DEFAULT_DAILY_LIMIT });
+      return DEFAULT_DAILY_LIMIT;
+    }
+    throw error;
+  }
+
+  return sanitizeDailyLimit(data?.daily_limit);
+}
+
+async function setBulkDailyLimit(dailyLimit) {
+  const nextLimit = sanitizeDailyLimit(dailyLimit);
+  const { data, error } = await supabase
+    .from(SETTINGS_TABLE)
+    .upsert(
+      {
+        id: SETTINGS_ROW_ID,
+        daily_limit: nextLimit,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'id' }
+    )
+    .select('daily_limit')
+    .single();
+
+  if (error) {
+    if (isMissingSettingsSchemaError(error)) {
+      const migrationError = new Error(
+        'Bulk import settings migration is not applied yet. Run supabase/migrations/014_bulk_import_settings.sql.'
+      );
+      migrationError.statusCode = 500;
+      throw migrationError;
+    }
+    throw error;
+  }
+
+  return sanitizeDailyLimit(data?.daily_limit);
+}
+
+async function enqueuePendingBulkSites(limit) {
+  const safeLimit = sanitizeDailyLimit(limit);
+  const threshold = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  const { data: pending, error } = await supabase
+    .from('sites')
+    .select('id')
+    .eq('import_source', 'excel_bulk_import')
+    .or(`last_contacted_at.is.null,last_contacted_at.lt.${threshold}`)
+    .not('owner_email', 'is', null)
+    .order('created_at', { ascending: true })
+    .limit(safeLimit);
+
+  if (error) {
+    logger.error('Bulk enqueue: failed to fetch pending sites', { error: error.message });
+    return { enqueued: 0, requestedLimit: safeLimit };
+  }
+
+  let enqueued = 0;
+  for (const site of pending || []) {
+    try {
+      await enqueueBulkSite({ siteId: site.id, batchId: null });
+      enqueued += 1;
+    } catch (err) {
+      logger.warn('Bulk enqueue: could not enqueue site', { siteId: site.id, error: err.message });
+    }
+  }
+
+  return { enqueued, requestedLimit: safeLimit };
 }
 
 // ── Queue init ─────────────────────────────────────────────────────
@@ -109,7 +201,7 @@ async function enqueueBulkSite({ siteId, batchId }) {
 
 /**
  * Registers a repeatable cron job that fires every day at 09:00 UTC.
- * Each fire picks the next DAILY_LIMIT pending sites and enqueues them.
+ * Each fire picks the next configured daily limit and enqueues them.
  */
 async function scheduleDailyTrigger() {
   const queue = getBulkQueue();
@@ -123,7 +215,7 @@ async function scheduleDailyTrigger() {
       jobId: 'bulk-daily-trigger',
     }
   );
-  logger.info('Daily bulk trigger scheduled (09:00 UTC, 2 sites/day)');
+  logger.info('Daily bulk trigger scheduled (09:00 UTC)');
 }
 
 // ── Core processing logic ──────────────────────────────────────────
@@ -310,32 +402,11 @@ function initBulkWorker() {
     async (job) => {
       // ── Daily trigger: pick next N pending sites and enqueue them ──
       if (job.name === 'daily-trigger') {
-        logger.info('Bulk: daily trigger fired, picking next sites');
-        const { data: pending, error } = await supabase
-          .from('sites')
-          .select('id')
-          .eq('import_source', 'excel_bulk_import')
-          .or('last_contacted_at.is.null,last_contacted_at.lt.' + new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
-          .not('owner_email', 'is', null)
-          .order('created_at', { ascending: true })
-          .limit(DAILY_LIMIT);
-
-        if (error) {
-          logger.error('Bulk trigger: failed to fetch pending sites', { error: error.message });
-          return { enqueued: 0 };
-        }
-
-        let enqueued = 0;
-        for (const site of (pending || [])) {
-          try {
-            await enqueueBulkSite({ siteId: site.id, batchId: null });
-            enqueued++;
-          } catch (err) {
-            logger.warn('Bulk trigger: could not enqueue site', { siteId: site.id, error: err.message });
-          }
-        }
-        logger.info('Bulk trigger: enqueued sites', { enqueued });
-        return { enqueued };
+        const dailyLimit = await getBulkDailyLimit();
+        logger.info('Bulk: daily trigger fired', { dailyLimit });
+        const outcome = await enqueuePendingBulkSites(dailyLimit);
+        logger.info('Bulk trigger: enqueued sites', outcome);
+        return outcome;
       }
 
       // ── Process a single site ──────────────────────────────────────
@@ -346,7 +417,6 @@ function initBulkWorker() {
     {
       connection,
       concurrency: 1, // scan one site at a time to avoid hammering Puppeteer
-      limiter: { max: 2, duration: 24 * 60 * 60 * 1000 }, // at most 2 process-site jobs per 24h
     }
   );
 
@@ -367,5 +437,8 @@ module.exports = {
   initBulkWorker,
   getBulkQueue,
   enqueueBulkSite,
+  enqueuePendingBulkSites,
+  getBulkDailyLimit,
+  setBulkDailyLimit,
   scheduleDailyTrigger,
 };
