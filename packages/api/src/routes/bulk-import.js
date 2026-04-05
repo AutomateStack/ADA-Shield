@@ -20,9 +20,15 @@ const { Router } = require('express');
 const crypto = require('crypto');
 const multer = require('multer');
 const XLSX = require('xlsx');
+const { z } = require('zod');
 const { supabase } = require('../db/supabase');
 const { logger } = require('../utils/logger');
-const { enqueueBulkSite, getBulkQueue } = require('../services/bulk-outreach-queue');
+const {
+  enqueuePendingBulkSites,
+  getBulkDailyLimit,
+  getBulkQueue,
+  setBulkDailyLimit,
+} = require('../services/bulk-outreach-queue');
 
 const router = Router();
 
@@ -103,6 +109,10 @@ function isMissingSchemaError(error) {
     message.includes('import_source')
   );
 }
+
+const bulkSettingsSchema = z.object({
+  dailyLimit: z.coerce.number().int().min(1).max(100),
+});
 
 /**
  * Given a worksheet, returns an array of row objects with normalised column names.
@@ -291,17 +301,6 @@ router.post('/', requireAdmin, upload.single('file'), async (req, res, next) => 
           continue;
         }
 
-        // Enqueue for scan + email (BullMQ deduplication by jobId ensures one job per site)
-        try {
-          await enqueueBulkSite({ siteId, batchId: batch.id });
-        } catch (queueErr) {
-          // Queue unavailable (no Redis) — still imported into DB, will be picked up when Redis is available
-          logger.warn('Bulk import: queue not available, site imported but not queued', {
-            siteId,
-            error: queueErr.message,
-          });
-        }
-
         results.imported++;
       } catch (rowErr) {
         results.skipped++;
@@ -333,7 +332,54 @@ router.post('/', requireAdmin, upload.single('file'), async (req, res, next) => 
       imported: results.imported,
       skipped: results.skipped,
       errors: results.errors,
-      message: `Imported ${results.imported} sites. ${results.skipped} skipped. Processing starts automatically — 2 sites scanned and emailed per day.`,
+      message: `Imported ${results.imported} sites. ${results.skipped} skipped. They are now pending for daily processing or Run Now from admin.`,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/settings', requireAdmin, async (_req, res, next) => {
+  try {
+    const dailyLimit = await getBulkDailyLimit();
+    return res.json({ dailyLimit });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/settings', requireAdmin, async (req, res, next) => {
+  try {
+    const parsed = bulkSettingsSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+
+    const dailyLimit = await setBulkDailyLimit(parsed.data.dailyLimit);
+    return res.json({ dailyLimit, message: 'Daily sites limit updated.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/run-now', requireAdmin, async (req, res, next) => {
+  try {
+    const parsed = bulkSettingsSchema.partial().safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+
+    const dailyLimit = parsed.data.dailyLimit || await getBulkDailyLimit();
+    const outcome = await enqueuePendingBulkSites(dailyLimit);
+    return res.json({
+      ...outcome,
+      message: `Queued ${outcome.enqueued} site(s) to scan and send email now.`,
     });
   } catch (err) {
     next(err);
@@ -362,12 +408,14 @@ router.get('/batches', requireAdmin, async (req, res, next) => {
 
 router.get('/queue-status', requireAdmin, async (req, res, next) => {
   try {
-    // Count pending (imported but never contacted) bulk sites
+    const threshold = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    // Count pending bulk sites using the same rule as the scheduler / Run Now.
     const { count: pendingCount } = await supabase
       .from('sites')
       .select('id', { count: 'exact', head: true })
       .eq('import_source', 'excel_bulk_import')
-      .is('last_contacted_at', null)
+      .or(`last_contacted_at.is.null,last_contacted_at.lt.${threshold}`)
       .not('owner_email', 'is', null);
 
     const queue = getBulkQueue();
@@ -378,11 +426,13 @@ router.get('/queue-status', requireAdmin, async (req, res, next) => {
       waitingJobs = await queue.getWaitingCount();
     }
 
+    const dailyLimit = await getBulkDailyLimit();
+
     return res.json({
       pendingSites: pendingCount || 0,
       activeJobs,
       waitingJobs,
-      dailyLimit: 2,
+      dailyLimit,
       queueAvailable: !!queue,
     });
   } catch (err) {
