@@ -454,6 +454,13 @@ router.get('/queue-status', requireAdmin, async (req, res, next) => {
       .or(`last_contacted_at.is.null,last_contacted_at.lt.${threshold}`)
       .not('owner_email', 'is', null);
 
+    // Count bulk-imported sites that have been successfully emailed at least once.
+    const { count: emailsSent } = await supabase
+      .from('sites')
+      .select('id', { count: 'exact', head: true })
+      .eq('import_source', 'excel_bulk_import')
+      .gt('contacted_count', 0);
+
     const queue = getBulkQueue();
     let activeJobs = 0;
     let waitingJobs = 0;
@@ -466,6 +473,7 @@ router.get('/queue-status', requireAdmin, async (req, res, next) => {
 
     return res.json({
       pendingSites: pendingCount || 0,
+      emailsSent: emailsSent || 0,
       activeJobs,
       waitingJobs,
       dailyLimit,

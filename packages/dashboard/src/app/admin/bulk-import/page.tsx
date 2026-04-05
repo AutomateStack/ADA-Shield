@@ -28,6 +28,7 @@ interface ImportResult {
 
 interface QueueStatus {
   pendingSites: number;
+  emailsSent: number;
   activeJobs: number;
   waitingJobs: number;
   dailyLimit: number;
@@ -213,7 +214,7 @@ export default function AdminBulkImportPage() {
 
       {/* Queue status cards */}
       {queueStatus && (
-        <div className="grid gap-4 sm:grid-cols-4">
+        <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
           <div className="rounded-xl border border-white/10 bg-white/5 p-4">
             <div className="text-xs uppercase tracking-wider text-slate-500">Pending Sites</div>
             <div className="mt-2 text-2xl font-bold text-white">{queueStatus.pendingSites}</div>
@@ -228,6 +229,11 @@ export default function AdminBulkImportPage() {
             <div className="text-xs uppercase tracking-wider text-slate-500">Active Jobs</div>
             <div className="mt-2 text-2xl font-bold text-white">{queueStatus.activeJobs}</div>
             <div className="mt-1 text-xs text-slate-400">running now</div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+            <div className="text-xs uppercase tracking-wider text-slate-500">Emails Sent</div>
+            <div className="mt-2 text-2xl font-bold text-white">{queueStatus.emailsSent}</div>
+            <div className="mt-1 text-xs text-slate-400">sites reached</div>
           </div>
           <div className="rounded-xl border border-white/10 bg-white/5 p-4">
             <div className="text-xs uppercase tracking-wider text-slate-500">Queue</div>
