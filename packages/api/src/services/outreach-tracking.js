@@ -103,13 +103,23 @@ function renderHtmlWithLinks(text) {
   }).replace(/\n/g, '<br />');
 }
 
-function buildTrackedEmailHtml({ subject, message, siteName, siteUrl, trackedReportUrl, trackingPixelUrl }) {
-  // Remove any existing URL from the plain-text message so we can inject a
-  // clean anchor tag instead of a bare tracking URL.
+function renderTrackedMessageHtml(message, trackedReportUrl, selfScanUrl) {
   const normalized = String(message || '').trim();
-  const strippedMessage = normalized.replace(/https?:\/\/[^\s]+/gi, '').trim();
+  const reportToken = '__ADA_REPORT_LINK__';
+  const hasExistingUrl = /https?:\/\/[^\s]+/i.test(normalized);
+  const textWithToken = hasExistingUrl
+    ? normalized.replace(/https?:\/\/[^\s]+/i, reportToken)
+    : `${normalized}\n\n${reportToken}`;
 
-  const reportLink = `<a href="${trackedReportUrl}" style="color: #2563eb; font-weight: bold; text-decoration: underline;">View your free accessibility report &rarr;</a>`;
+  const reportLink = `<a href="${escapeHtml(trackedReportUrl)}" style="color: #2563eb; font-weight: bold; text-decoration: underline;">View your free accessibility report &rarr;</a>`;
+  const selfScanLink = `<a href="${escapeHtml(selfScanUrl)}" style="color: #0f766e; font-weight: 600; text-decoration: underline;">You can also run your own free scan here</a>`;
+  const ctaBlock = `${reportLink}<br /><span style="display:inline-block;margin:8px 0 4px;color:#64748b;font-size:12px;">or</span><br />${selfScanLink}`;
+
+  return renderHtmlWithLinks(textWithToken).replace(reportToken, ctaBlock);
+}
+
+function buildTrackedEmailHtml({ subject, message, siteName, siteUrl, trackedReportUrl, trackingPixelUrl, selfScanUrl }) {
+  const scanUrl = selfScanUrl || getDashboardBaseUrl();
 
   const safeSubject = escapeHtml(subject);
   const safeSiteName = escapeHtml(siteName || 'your website');
@@ -135,7 +145,7 @@ function buildTrackedEmailHtml({ subject, message, siteName, siteUrl, trackedRep
   <div class="card">
     <h1>${safeSubject}</h1>
     <div class="meta">Regarding ${safeSiteName}${safeSiteUrl ? ` (${safeSiteUrl})` : ''}</div>
-    <div class="message">${renderHtmlWithLinks(strippedMessage)}<br /><br />${reportLink}</div>
+    <div class="message">${renderTrackedMessageHtml(message, trackedReportUrl, scanUrl)}</div>
     <div class="footer">Sent via ADA Shield</div>
   </div>
   <img src="${trackingPixelUrl}" alt="" width="1" height="1" style="display:block;border:0;width:1px;height:1px;opacity:0;" />

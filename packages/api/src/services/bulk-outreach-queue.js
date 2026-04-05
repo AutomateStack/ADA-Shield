@@ -298,6 +298,7 @@ ADA Shield`;
       siteUrl: site.url,
       trackedReportUrl: trackingUrls.trackedReportUrl,
       trackingPixelUrl: trackingUrls.trackingPixelUrl,
+      selfScanUrl: buildReportUrl(null),
     });
 
     const contactEntry = await createSiteContactHistoryEntry({
