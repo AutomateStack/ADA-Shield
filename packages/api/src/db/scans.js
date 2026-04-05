@@ -39,6 +39,7 @@ async function saveScanResult(result) {
         incomplete_rules: result.incompleteRules,
         job_id: result.jobId || null,
         scan_duration_ms: result.scanDurationMs,
+        public_token: result.publicToken || undefined,
       })
       .select()
       .single();
