@@ -111,9 +111,10 @@ function renderTrackedMessageHtml(message, trackedReportUrl, selfScanUrl) {
     ? normalized.replace(/https?:\/\/[^\s]+/i, reportToken)
     : `${normalized}\n\n${reportToken}`;
 
-  const reportLink = `<a href="${escapeHtml(trackedReportUrl)}" style="color: #2563eb; font-weight: bold; text-decoration: underline;">View your free accessibility report &rarr;</a>`;
-  const selfScanLink = `<a href="${escapeHtml(selfScanUrl)}" style="color: #0f766e; font-weight: 600; text-decoration: underline;">You can also run your own free scan here</a>`;
-  const ctaBlock = `${reportLink}<br /><span style="display:inline-block;margin:8px 0 4px;color:#64748b;font-size:12px;">or</span><br />${selfScanLink}`;
+  // Plain underlined links — no bold, no heavy colour — looks like a real person's email
+  const reportLink = `<a href="${escapeHtml(trackedReportUrl)}" style="color:#1d4ed8;text-decoration:underline;">View your free accessibility report &rarr;</a>`;
+  const selfScanLink = `<a href="${escapeHtml(selfScanUrl)}" style="color:#0f766e;text-decoration:underline;">Run your own free scan here</a>`;
+  const ctaBlock = `${reportLink}<br><span style="display:inline-block;margin:6px 0 2px;color:#6b7280;font-size:13px;">or</span><br>${selfScanLink}`;
 
   return renderHtmlWithLinks(textWithToken).replace(reportToken, ctaBlock);
 }
@@ -122,90 +123,50 @@ function buildTrackedEmailHtml({ subject, message, siteName, siteUrl, trackedRep
   const scanUrl = selfScanUrl || getDashboardBaseUrl();
 
   const safeSubject = escapeHtml(subject);
-  const safeSiteName = escapeHtml(siteName || 'your website');
-  const safeSiteUrl = escapeHtml(siteUrl || '');
 
-  return `
-<!DOCTYPE html>
+  // Plain letter-style template — left-aligned, white background, no card borders.
+  // Designed to look like a real person wrote it, not a marketing blast.
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="x-apple-disable-message-reformatting">
   <title>${safeSubject}</title>
-  <style>
-    body {
-      margin: 0;
-      padding: 28px 16px;
-      background: #f1f5f9;
-      color: #0f172a;
-      font-family: 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-      -webkit-text-size-adjust: 100%;
-      text-size-adjust: 100%;
-    }
-    .card {
-      max-width: 700px;
-      margin: 0 auto;
-      background: #ffffff;
-      border: 1px solid #dbe2ea;
-      border-radius: 14px;
-      padding: 30px;
-      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
-    }
-    h1 {
-      font-size: 28px;
-      line-height: 1.3;
-      margin: 0 0 10px;
-      color: #0f172a;
-      letter-spacing: -0.01em;
-    }
-    .meta {
-      color: #475569;
-      font-size: 13px;
-      line-height: 1.45;
-      margin: 0 0 22px;
-    }
-    .message {
-      color: #1e293b;
-      font-size: 17px;
-      line-height: 1.72;
-      font-weight: 400;
-      word-break: break-word;
-    }
-    .message strong {
-      font-weight: 600;
-    }
-    .footer {
-      margin-top: 26px;
-      color: #64748b;
-      font-size: 12px;
-      line-height: 1.5;
-    }
-    @media (max-width: 640px) {
-      body {
-        padding: 12px;
-      }
-      .card {
-        border-radius: 12px;
-        padding: 20px;
-      }
-      h1 {
-        font-size: 23px;
-      }
-      .message {
-        font-size: 16px;
-        line-height: 1.66;
-      }
-    }
-  </style>
 </head>
-<body>
-  <div class="card">
-    <h1>${safeSubject}</h1>
-    <div class="meta">Regarding ${safeSiteName}${safeSiteUrl ? ` (${safeSiteUrl})` : ''}</div>
-    <div class="message">${renderTrackedMessageHtml(message, trackedReportUrl, scanUrl)}</div>
-    <div class="footer">Sent via ADA Shield</div>
-  </div>
-  <img src="${trackingPixelUrl}" alt="" width="1" height="1" style="display:block;border:0;width:1px;height:1px;opacity:0;" />
+<body style="margin:0;padding:0;background:#ffffff;-webkit-text-size-adjust:100%;text-size-adjust:100%;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#ffffff;">
+    <tr>
+      <td align="left" style="padding:40px 24px 32px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:620px;">
+
+          <!-- Body text -->
+          <tr>
+            <td style="font-family:'Segoe UI','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:16px;line-height:1.75;color:#1a1a1a;text-align:left;padding-bottom:28px;">
+              ${renderTrackedMessageHtml(message, trackedReportUrl, scanUrl)}
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding-bottom:20px;">
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:0;">
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="font-family:'Segoe UI','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:12px;line-height:1.5;color:#9ca3af;text-align:left;">
+              ADA Shield &mdash; Accessibility compliance reports<br>
+              You received this because your website was selected for a complimentary accessibility review.
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+  <img src="${escapeHtml(trackingPixelUrl)}" alt="" width="1" height="1" style="display:block;border:0;width:1px;height:1px;line-height:1px;">
 </body>
 </html>`;
 }
