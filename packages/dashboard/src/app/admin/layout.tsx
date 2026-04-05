@@ -10,6 +10,7 @@ import {
   ArrowLeft,
   FileText,
   Globe,
+  Mail,
 } from 'lucide-react';
 import { ShieldLogo } from '@/components/ui/shield-logo';
 import { cn } from '@/lib/utils';
@@ -18,6 +19,7 @@ const adminNavItems = [
   { href: '/admin', label: 'Overview', icon: LayoutDashboard },
   { href: '/admin/scans', label: 'Scans', icon: Activity },
   { href: '/admin/sites', label: 'Sites', icon: Globe },
+  { href: '/admin/outreach', label: 'Outreach', icon: Mail },
   { href: '/admin/users', label: 'Users', icon: Users },
   { href: '/admin/subscriptions', label: 'Subscriptions', icon: CreditCard },
   { href: '/admin/blog', label: 'Blog', icon: FileText },
