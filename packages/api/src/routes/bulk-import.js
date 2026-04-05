@@ -89,6 +89,21 @@ function normaliseOptionalUrl(raw) {
   return 'https://' + u;
 }
 
+function isMissingSchemaError(error) {
+  const code = String(error?.code || '').trim();
+  const message = String(error?.message || '').toLowerCase();
+
+  // 42P01: undefined_table, 42703: undefined_column (Postgres)
+  if (code === '42P01' || code === '42703') return true;
+
+  return (
+    message.includes('bulk_import_batches') ||
+    message.includes('facebook_url') ||
+    message.includes('instagram_url') ||
+    message.includes('import_source')
+  );
+}
+
 /**
  * Given a worksheet, returns an array of row objects with normalised column names.
  * Handles case-insensitive and whitespace-trimmed header matching.
@@ -185,7 +200,15 @@ router.post('/', requireAdmin, upload.single('file'), async (req, res, next) => 
       .select()
       .single();
 
-    if (batchErr) throw batchErr;
+    if (batchErr) {
+      if (isMissingSchemaError(batchErr)) {
+        return res.status(500).json({
+          error:
+            'Bulk import database migration is not applied yet. Run supabase/migrations/013_bulk_import_site_columns.sql, then try upload again.',
+        });
+      }
+      throw batchErr;
+    }
 
     const results = {
       imported: 0,
