@@ -133,12 +133,69 @@ function buildTrackedEmailHtml({ subject, message, siteName, siteUrl, trackedRep
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${safeSubject}</title>
   <style>
-    body { margin: 0; padding: 24px; background: #f8fafc; font-family: Arial, sans-serif; color: #0f172a; }
-    .card { max-width: 680px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 28px; }
-    h1 { font-size: 20px; margin: 0 0 10px; color: #0f172a; }
-    .meta { color: #64748b; font-size: 12px; margin: 0 0 18px; }
-    .message { font-size: 14px; line-height: 1.7; color: #1e293b; }
-    .footer { margin-top: 22px; color: #64748b; font-size: 12px; }
+    body {
+      margin: 0;
+      padding: 28px 16px;
+      background: #f1f5f9;
+      color: #0f172a;
+      font-family: 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+    }
+    .card {
+      max-width: 700px;
+      margin: 0 auto;
+      background: #ffffff;
+      border: 1px solid #dbe2ea;
+      border-radius: 14px;
+      padding: 30px;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+    }
+    h1 {
+      font-size: 28px;
+      line-height: 1.3;
+      margin: 0 0 10px;
+      color: #0f172a;
+      letter-spacing: -0.01em;
+    }
+    .meta {
+      color: #475569;
+      font-size: 13px;
+      line-height: 1.45;
+      margin: 0 0 22px;
+    }
+    .message {
+      color: #1e293b;
+      font-size: 17px;
+      line-height: 1.72;
+      font-weight: 400;
+      word-break: break-word;
+    }
+    .message strong {
+      font-weight: 600;
+    }
+    .footer {
+      margin-top: 26px;
+      color: #64748b;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    @media (max-width: 640px) {
+      body {
+        padding: 12px;
+      }
+      .card {
+        border-radius: 12px;
+        padding: 20px;
+      }
+      h1 {
+        font-size: 23px;
+      }
+      .message {
+        font-size: 16px;
+        line-height: 1.66;
+      }
+    }
   </style>
 </head>
 <body>
