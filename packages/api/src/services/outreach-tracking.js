@@ -55,7 +55,13 @@ function renderHtmlWithLinks(text) {
 }
 
 function buildTrackedEmailHtml({ subject, message, siteName, siteUrl, trackedReportUrl, trackingPixelUrl }) {
-  const trackedMessage = injectTrackedLink(message, trackedReportUrl);
+  // Remove any existing URL from the plain-text message so we can inject a
+  // clean anchor tag instead of a bare tracking URL.
+  const normalized = String(message || '').trim();
+  const strippedMessage = normalized.replace(/https?:\/\/[^\s]+/gi, '').trim();
+
+  const reportLink = `<a href="${trackedReportUrl}" style="color: #2563eb; font-weight: bold; text-decoration: underline;">View your free accessibility report &rarr;</a>`;
+
   const safeSubject = escapeHtml(subject);
   const safeSiteName = escapeHtml(siteName || 'your website');
   const safeSiteUrl = escapeHtml(siteUrl || '');
@@ -80,7 +86,7 @@ function buildTrackedEmailHtml({ subject, message, siteName, siteUrl, trackedRep
   <div class="card">
     <h1>${safeSubject}</h1>
     <div class="meta">Regarding ${safeSiteName}${safeSiteUrl ? ` (${safeSiteUrl})` : ''}</div>
-    <div class="message">${renderHtmlWithLinks(trackedMessage)}</div>
+    <div class="message">${renderHtmlWithLinks(strippedMessage)}<br /><br />${reportLink}</div>
     <div class="footer">Sent via ADA Shield</div>
   </div>
   <img src="${trackingPixelUrl}" alt="" width="1" height="1" style="display:block;border:0;width:1px;height:1px;opacity:0;" />
