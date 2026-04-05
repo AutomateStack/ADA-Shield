@@ -84,11 +84,15 @@ export default function AdminBulkImportPage() {
       if (batchRes.ok) {
         const data = await batchRes.json();
         setBatches(data.batches || []);
+      } else {
+        setError('Failed to load import batches. Check admin secret and API URL configuration.');
       }
       if (queueRes.ok) {
         const queuePayload = await queueRes.json();
         setQueueStatus(queuePayload);
         setDailyLimitInput(String(queuePayload.dailyLimit || 2));
+      } else {
+        setError('Failed to load queue status. Run Now may be unavailable until API auth/config is fixed.');
       }
     } finally {
       setLoading(false);
@@ -269,7 +273,7 @@ export default function AdminBulkImportPage() {
             </button>
             <button
               onClick={runNow}
-              disabled={runningNow || !queueStatus?.queueAvailable}
+              disabled={runningNow}
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
             >
               {runningNow ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
