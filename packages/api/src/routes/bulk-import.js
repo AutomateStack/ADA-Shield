@@ -83,8 +83,18 @@ function normaliseUrl(raw) {
 
 function normaliseEmail(raw) {
   if (!raw) return null;
-  const e = String(raw).trim().toLowerCase();
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e : null;
+  const str = String(raw).trim();
+  if (!str) return null;
+
+  // Split on common multi-email delimiters: comma, semicolon, pipe, or whitespace
+  const candidates = str.split(/[,;|\s]+/).map((s) => s.trim().toLowerCase());
+
+  for (const candidate of candidates) {
+    if (candidate && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
 }
 
 function normaliseOptionalUrl(raw) {
