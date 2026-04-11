@@ -1046,7 +1046,7 @@ export default function AdminOutreachPage() {
         <FollowUpModal
           site={followUpModal}
           onClose={() => setFollowUpModal(null)}
-          onSent={(siteId) => setSentSiteIds((prev) => new Set([...prev, siteId]))}
+          onSent={(siteId) => setSentSiteIds((prev) => { const next = new Set(prev); next.add(siteId); return next; })}
           apiUrl={apiUrl}
           adminSecret={adminSecret}
         />
