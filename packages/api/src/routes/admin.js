@@ -22,6 +22,7 @@ const {
   getSiteOutreachAnalytics,
   getOutreachOverview,
   getOutreachClickAnalytics,
+  getScheduledFollowUps,
   getFollowUpDueSites,
 } = require('../db/admin');
 const { saveScanResult, updateSiteLastScanned } = require('../db/scans');
@@ -968,6 +969,17 @@ router.get('/outreach/click-analytics', async (req, res, next) => {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
     const cacheKey = `outreach-click-analytics:${limit}`;
     const result = await getCachedAdminValue(cacheKey, () => getOutreachClickAnalytics({ limit }));
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Outreach: Scheduled Follow-ups ───────────────────────────────
+router.get('/outreach/followup-scheduled', async (req, res, next) => {
+  try {
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 100));
+    const result = await getScheduledFollowUps({ limit });
     return res.json(result);
   } catch (error) {
     next(error);
