@@ -19,7 +19,7 @@ import {
   Flame,
   AlertCircle,
   BarChart3,
-  RepeatClock,
+  RotateCcw,
   ArrowRight,
   Loader2,
   ChevronRight,
@@ -529,7 +529,7 @@ export default function AdminOutreachPage() {
   const TABS: Array<{ key: Tab; label: string; icon: React.ElementType; count?: number }> = [
     { key: 'overview', label: 'Overview', icon: Mail },
     { key: 'clicks', label: 'Click Analysis', icon: MousePointerClick, count: clickData?.funnel.clicked },
-    { key: 'followup', label: 'Follow-up Queue', icon: RepeatClock, count: followUpSites.filter(s => s.hasEmail && !sentSiteIds.has(s.siteId)).length || undefined },
+    { key: 'followup', label: 'Follow-up Queue', icon: RotateCcw, count: followUpSites.filter(s => s.hasEmail && !sentSiteIds.has(s.siteId)).length || undefined },
   ];
 
   return (
@@ -899,7 +899,7 @@ export default function AdminOutreachPage() {
           {/* Explanation banner */}
           {!followUpLoading && (
             <div className="flex items-start gap-3 p-4 bg-brand-500/5 border border-brand-500/15 rounded-xl">
-              <RepeatClock className="h-5 w-5 text-brand-400 flex-shrink-0 mt-0.5" />
+              <RotateCcw className="h-5 w-5 text-brand-400 flex-shrink-0 mt-0.5" />
               <div>
                 <p className="text-sm font-medium text-slate-300">10-Day Re-engagement Cycle</p>
                 <p className="text-xs text-slate-500 mt-0.5">
