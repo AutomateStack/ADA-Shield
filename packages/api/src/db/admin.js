@@ -913,6 +913,198 @@ async function getOutreachOverview({ limit = 10 } = {}) {
   }
 }
 
+/**
+ * Returns click-level analytics for all outreach emails:
+ * - Funnel: sent → opened → clicked
+ * - Per-site breakdown: emails sent, opens, clicks, click rate, last click
+ * - Recent click events ordered by time
+ */
+async function getOutreachClickAnalytics({ limit = 50 } = {}) {
+  try {
+    const [historyResult, clickEventsResult] = await Promise.all([
+      supabase
+        .from('site_contact_history')
+        .select('id, site_id, recipient_email, subject, delivery_status, created_at, opens_count, clicks_count, lead_score, lead_status, last_clicked_at, last_clicked_url, first_clicked_at, sites(id, name, url)')
+        .order('created_at', { ascending: false })
+        .limit(500),
+      supabase
+        .from('site_contact_events')
+        .select('id, site_id, contact_history_id, event_type, url, created_at, metadata')
+        .eq('event_type', 'click')
+        .order('created_at', { ascending: false })
+        .limit(limit),
+    ]);
+
+    if (historyResult.error) throw historyResult.error;
+    if (clickEventsResult.error) throw clickEventsResult.error;
+
+    const entries = historyResult.data || [];
+    const clickEvents = clickEventsResult.data || [];
+
+    // Funnel totals
+    const sentCount = entries.filter((e) => e.delivery_status === 'sent').length;
+    const openedCount = entries.filter((e) => Number(e.opens_count || 0) > 0).length;
+    const clickedCount = entries.filter((e) => Number(e.clicks_count || 0) > 0).length;
+    const totalClicks = entries.reduce((sum, e) => sum + Number(e.clicks_count || 0), 0);
+
+    // Per-site aggregation
+    const siteMap = {};
+    for (const entry of entries) {
+      if (!entry.site_id) continue;
+      if (!siteMap[entry.site_id]) {
+        siteMap[entry.site_id] = {
+          siteId: entry.site_id,
+          siteName: entry.sites?.name || null,
+          siteUrl: entry.sites?.url || null,
+          emailsSent: 0,
+          opened: 0,
+          clicked: 0,
+          totalClicks: 0,
+          lastClickAt: null,
+          recipients: new Set(),
+        };
+      }
+      const s = siteMap[entry.site_id];
+      if (entry.delivery_status === 'sent') s.emailsSent += 1;
+      if (Number(entry.opens_count || 0) > 0) s.opened += 1;
+      if (Number(entry.clicks_count || 0) > 0) {
+        s.clicked += 1;
+        s.totalClicks += Number(entry.clicks_count);
+      }
+      if (entry.last_clicked_at) {
+        if (!s.lastClickAt || entry.last_clicked_at > s.lastClickAt) {
+          s.lastClickAt = entry.last_clicked_at;
+        }
+      }
+      if (entry.recipient_email) s.recipients.add(entry.recipient_email);
+    }
+
+    const sitesWithClicks = Object.values(siteMap)
+      .filter((s) => s.clicked > 0)
+      .sort((a, b) => b.totalClicks - a.totalClicks)
+      .map((s) => ({
+        siteId: s.siteId,
+        siteName: s.siteName,
+        siteUrl: s.siteUrl,
+        emailsSent: s.emailsSent,
+        opened: s.opened,
+        clicked: s.clicked,
+        totalClicks: s.totalClicks,
+        clickRate: s.emailsSent > 0 ? Math.round((s.clicked / s.emailsSent) * 100) : 0,
+        lastClickAt: s.lastClickAt,
+        uniqueRecipients: s.recipients.size,
+      }));
+
+    return {
+      funnel: {
+        sent: sentCount,
+        opened: openedCount,
+        clicked: clickedCount,
+        totalClicks,
+        openRate: sentCount > 0 ? Math.round((openedCount / sentCount) * 100) : 0,
+        clickRate: sentCount > 0 ? Math.round((clickedCount / sentCount) * 100) : 0,
+        clickToOpenRate: openedCount > 0 ? Math.round((clickedCount / openedCount) * 100) : 0,
+      },
+      sitesWithClicks,
+      recentClicks: clickEvents,
+    };
+  } catch (error) {
+    logger.error('Failed to get outreach click analytics', { error: error.message });
+    throw error;
+  }
+}
+
+/**
+ * Returns sites eligible for a 10-day follow-up campaign:
+ * - Must have been contacted at least once (last_contacted_at is set)
+ * - Last contact was >= minDays ago (default 10)
+ * - Joined with latest outreach entry per site for engagement context
+ */
+async function getFollowUpDueSites({ minDays = 10, limit = 100 } = {}) {
+  try {
+    const cutoff = new Date(Date.now() - minDays * 24 * 60 * 60 * 1000).toISOString();
+
+    const { data: sites, error: sitesError } = await supabase
+      .from('sites')
+      .select('id, url, name, owner_name, owner_email, notification_recipients, contacted_count, last_contacted_at, type')
+      .not('last_contacted_at', 'is', null)
+      .lte('last_contacted_at', cutoff)
+      .order('last_contacted_at', { ascending: true })
+      .limit(limit);
+
+    if (sitesError) throw sitesError;
+
+    if (!sites || sites.length === 0) {
+      return { sites: [], total: 0 };
+    }
+
+    const siteIds = sites.map((s) => s.id);
+
+    // Get best outreach entry per site (highest engagement) for context
+    const { data: historyData, error: historyError } = await supabase
+      .from('site_contact_history')
+      .select('site_id, opens_count, clicks_count, lead_score, lead_status, delivery_status, last_engagement_at, created_at')
+      .in('site_id', siteIds)
+      .eq('delivery_status', 'sent')
+      .order('created_at', { ascending: false });
+
+    if (historyError) throw historyError;
+
+    // Map best (highest engagement) entry per site
+    const bestBySite = {};
+    for (const entry of historyData || []) {
+      const existing = bestBySite[entry.site_id];
+      if (!existing || (entry.lead_score || 0) > (existing.lead_score || 0)) {
+        bestBySite[entry.site_id] = entry;
+      }
+    }
+
+    // Total email counts per site
+    const countBySite = {};
+    for (const entry of historyData || []) {
+      countBySite[entry.site_id] = (countBySite[entry.site_id] || 0) + 1;
+    }
+
+    const daysSince = (dateStr) => {
+      if (!dateStr) return null;
+      return Math.floor((Date.now() - new Date(dateStr).getTime()) / (1000 * 60 * 60 * 24));
+    };
+
+    const result = sites.map((site) => {
+      const best = bestBySite[site.site_id] || bestBySite[site.id] || null;
+      const hasEmail = Boolean(
+        site.owner_email ||
+        (Array.isArray(site.notification_recipients) && site.notification_recipients.length > 0)
+      );
+      return {
+        siteId: site.id,
+        siteName: site.name,
+        siteUrl: site.url,
+        ownerEmail: site.owner_email || null,
+        recipients: site.notification_recipients || [],
+        hasEmail,
+        contactedCount: site.contacted_count || 0,
+        lastContactedAt: site.last_contacted_at,
+        daysSinceLastContact: daysSince(site.last_contacted_at),
+        totalEmailsSent: countBySite[site.id] || 0,
+        bestLeadScore: best?.lead_score || 0,
+        bestLeadStatus: best?.lead_status || 'cold',
+        totalOpens: best?.opens_count || 0,
+        totalClicks: best?.clicks_count || 0,
+        lastEngagementAt: best?.last_engagement_at || null,
+      };
+    });
+
+    return {
+      sites: result,
+      total: result.length,
+    };
+  } catch (error) {
+    logger.error('Failed to get follow-up due sites', { error: error.message });
+    throw error;
+  }
+}
+
 module.exports = {
   getAdminStats,
   getAdminScans,
@@ -935,4 +1127,6 @@ module.exports = {
   getSiteContactEvents,
   getSiteOutreachAnalytics,
   getOutreachOverview,
+  getOutreachClickAnalytics,
+  getFollowUpDueSites,
 };
