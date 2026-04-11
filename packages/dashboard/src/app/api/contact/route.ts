@@ -4,6 +4,8 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const EMAIL_FROM = process.env.EMAIL_FROM || 'ADA Shield <thirmal@wealthtalks.in>';
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'thirmal@wealthtalks.in';
 const SUPPORT_EMAIL_CC = process.env.SUPPORT_EMAIL_CC || 'tthirmal@gmail.com';
+// Both emails are TO recipients — avoids self-domain filtering on wealthtalks.in when sent via Resend
+const SUPPORT_EMAIL_TO = [SUPPORT_EMAIL, SUPPORT_EMAIL_CC];
 
 export async function POST(req: NextRequest) {
   try {
@@ -45,8 +47,7 @@ export async function POST(req: NextRequest) {
       },
       body: JSON.stringify({
         from: EMAIL_FROM,
-        to: [SUPPORT_EMAIL],
-        cc: [SUPPORT_EMAIL_CC],
+        to: SUPPORT_EMAIL_TO,
         reply_to: safeEmail,
         subject: `[ADA Shield Contact] ${safeTopic} — from ${safeName}`,
         html: `
