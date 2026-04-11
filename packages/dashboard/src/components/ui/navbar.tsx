@@ -16,6 +16,7 @@ export function Navbar() {
     { href: '/#how-it-works', label: 'How It Works' },
     { href: '/ada-compliance-guide', label: 'Compliance Guide' },
     { href: '/#pricing', label: 'Pricing' },
+    { href: '/contact', label: 'Contact' },
   ];
 
   return (
