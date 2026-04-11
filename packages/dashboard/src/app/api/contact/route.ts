@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const EMAIL_FROM = process.env.EMAIL_FROM || 'ADA Shield <info@wealthtalks.in>';
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'info@wealthtalks.in';
+const SUPPORT_CC = process.env.SUPPORT_CC || 'tthirmal@gmail.com';
 
 export async function POST(req: NextRequest) {
   try {
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         from: EMAIL_FROM,
         to: [SUPPORT_EMAIL],
+        cc: [SUPPORT_CC],
         reply_to: safeEmail,
         subject: `[ADA Shield Contact] ${safeTopic} — from ${safeName}`,
         html: `
