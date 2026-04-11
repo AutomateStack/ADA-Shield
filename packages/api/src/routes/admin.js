@@ -21,6 +21,8 @@ const {
   getSiteContactHistory,
   getSiteOutreachAnalytics,
   getOutreachOverview,
+  getOutreachClickAnalytics,
+  getFollowUpDueSites,
 } = require('../db/admin');
 const { saveScanResult, updateSiteLastScanned } = require('../db/scans');
 const { createOrUpdateFreeScanSite } = require('../db/sites');
@@ -955,6 +957,181 @@ router.get('/outreach/overview', async (req, res, next) => {
     const cacheKey = `outreach-overview:${limit}`;
     const result = await getCachedAdminValue(cacheKey, () => getOutreachOverview({ limit }));
     return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Outreach: Click Analytics ──────────────────────────────────────
+router.get('/outreach/click-analytics', async (req, res, next) => {
+  try {
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const cacheKey = `outreach-click-analytics:${limit}`;
+    const result = await getCachedAdminValue(cacheKey, () => getOutreachClickAnalytics({ limit }));
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Outreach: Follow-up Due Sites (10-day cycle) ───────────────────
+router.get('/outreach/followup-due', async (req, res, next) => {
+  try {
+    const minDays = Math.max(1, parseInt(req.query.minDays, 10) || 10);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 100));
+    // Do NOT cache — must be fresh for accurate eligibility
+    const result = await getFollowUpDueSites({ minDays, limit });
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Outreach: Send Manual Follow-up to Site ───────────────────────
+const manualFollowUpSchema = z.object({
+  subject: z.string().min(1).max(200),
+  message: z.string().min(1).max(5000),
+  templateStyle: z.string().optional(),
+});
+
+router.post('/sites/:siteId/send-followup', async (req, res, next) => {
+  try {
+    const { dashboardOrigin, apiOrigin } = getRequestOrigins(req);
+    const parsed = manualFollowUpSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+
+    const site = await getSiteById(req.params.siteId);
+    if (!site) {
+      return res.status(404).json({ error: 'Site not found' });
+    }
+
+    const toRecipients = new Set();
+    if (site.owner_email) toRecipients.add(site.owner_email);
+    if (Array.isArray(site.notification_recipients)) {
+      site.notification_recipients.forEach((e) => toRecipients.add(e));
+    }
+
+    if (toRecipients.size === 0) {
+      return res.status(400).json({ error: 'No recipient emails configured for this site' });
+    }
+
+    const latestScan = await getLatestSiteScanSummary(req.params.siteId);
+    const reportUrl = buildReportUrl(latestScan?.public_token || null, {
+      dashboardBaseUrl: dashboardOrigin,
+    });
+    const sendBatchId = crypto.randomUUID();
+    const toList = Array.from(toRecipients);
+    const sentResults = [];
+    const failures = [];
+
+    for (let index = 0; index < toList.length; index += 1) {
+      const recipient = toList[index];
+      const trackingToken = crypto.randomUUID();
+      const trackingUrls = buildTrackingUrls(trackingToken, reportUrl, { apiBaseUrl: apiOrigin });
+      const trackedText = injectTrackedLink(
+        parsed.data.message,
+        `Here is your updated accessibility report: ${trackingUrls.reportUrl}`
+      );
+      const trackedHtml = buildTrackedEmailHtml({
+        subject: parsed.data.subject,
+        message: parsed.data.message,
+        siteName: site.name || site.url,
+        siteUrl: site.url,
+        trackedReportUrl: trackingUrls.trackedReportUrl,
+        trackingPixelUrl: trackingUrls.trackingPixelUrl,
+        selfScanUrl: buildReportUrl(null, { dashboardBaseUrl: dashboardOrigin }),
+      });
+
+      const contactEntry = await createSiteContactHistoryEntry({
+        siteId: site.id,
+        recipientEmail: recipient,
+        subject: parsed.data.subject,
+        message: trackedText,
+        templateStyle: parsed.data.templateStyle || null,
+        deliveryChannel: 'api-followup',
+        deliveryStatus: 'sent',
+        sendBatchId,
+        scanId: latestScan?.id || null,
+        reportUrl: trackingUrls.reportUrl,
+        trackedReportUrl: trackingUrls.trackedReportUrl,
+        trackingPixelUrl: trackingUrls.trackingPixelUrl,
+        automationEnabled: false,
+        trackingToken,
+      });
+
+      let providerMessageId = null;
+      let deliveryChannel = 'supabase-function';
+
+      try {
+        const response = await invokeSupabaseFunction('send-admin-email', {
+          to: [recipient],
+          subject: parsed.data.subject,
+          text: trackedText,
+          html: trackedHtml,
+          siteId: site.id,
+          siteName: site.name,
+          siteUrl: site.url,
+        });
+        providerMessageId = response?.messageId || null;
+      } catch (edgeError) {
+        try {
+          deliveryChannel = 'api-fallback';
+          const fallbackResponse = await sendEmail({
+            to: [recipient],
+            subject: parsed.data.subject,
+            text: trackedText,
+            html: trackedHtml,
+          });
+          providerMessageId = fallbackResponse?.id || null;
+        } catch (fallbackError) {
+          const providerMessage = fallbackError?.message || edgeError?.message || 'Failed to send email';
+          await updateSiteContactHistoryEntry(contactEntry.id, {
+            delivery_status: 'failed',
+            delivery_channel: deliveryChannel,
+          });
+          failures.push({ recipient, message: providerMessage });
+          continue;
+        }
+      }
+
+      await updateSiteContactHistoryEntry(contactEntry.id, {
+        delivery_channel: deliveryChannel,
+        provider_message_id: providerMessageId,
+      });
+
+      await createSiteContactEvent({
+        siteId: site.id,
+        contactHistoryId: contactEntry.id,
+        eventType: 'sent',
+        metadata: { automated: false, followUp: true, sendBatchId, recipient },
+      });
+
+      sentResults.push({ recipient, contactHistoryId: contactEntry.id, deliveryChannel });
+    }
+
+    if (sentResults.length === 0) {
+      const providerMessage = failures[0]?.message || 'Failed to send email';
+      return res.status(400).json({
+        error: getEmailSendFailureMessage(providerMessage),
+        details: providerMessage,
+      });
+    }
+
+    await markSiteAsContacted(req.params.siteId);
+    adminReadCache.clear();
+
+    return res.json({
+      success: true,
+      message: failures.length > 0 ? 'Follow-up sent with some delivery failures' : 'Follow-up emails sent successfully',
+      sentCount: sentResults.length,
+      failedCount: failures.length,
+      failures,
+    });
   } catch (error) {
     next(error);
   }
