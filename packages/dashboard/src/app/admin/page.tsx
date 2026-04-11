@@ -18,6 +18,12 @@ import {
   Zap,
   ShieldCheck,
   ArrowUpRight,
+  Eye,
+  MousePointerClick,
+  Flame,
+  RotateCcw,
+  CheckCircle2,
+  CalendarClock,
 } from 'lucide-react';
 
 interface AdminStats {
@@ -29,6 +35,24 @@ interface AdminStats {
   totalSites: number;
   activeSubscriptions: number;
   avgRiskScore: number;
+}
+
+interface OutreachSummary {
+  sentCount: number;
+  openedCount: number;
+  clickedCount: number;
+  openRate: number;
+  clickRate: number;
+  hotLeadCount: number;
+  followUpsScheduled: number;
+}
+
+interface FollowUpHistorySummary {
+  total: number;
+  sent: number;
+  scheduled: number;
+  skipped: number;
+  canceled: number;
 }
 
 interface TopUrl {
@@ -50,6 +74,8 @@ const formatRelativeTime = (dateString: string): string => {
 export default function AdminOverviewPage() {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [topUrls, setTopUrls] = useState<TopUrl[]>([]);
+  const [outreachSummary, setOutreachSummary] = useState<OutreachSummary | null>(null);
+  const [followUpHistory, setFollowUpHistory] = useState<FollowUpHistorySummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -62,9 +88,11 @@ export default function AdminOverviewPage() {
     setError('');
     try {
       const headers = { 'x-admin-secret': adminSecret };
-      const [statsRes, topRes] = await Promise.all([
+      const [statsRes, topRes, outreachRes, historyRes] = await Promise.all([
         fetch(`${apiUrl}/api/admin/stats`, { headers }),
         fetch(`${apiUrl}/api/admin/scans/top-urls?limit=10`, { headers }),
+        fetch(`${apiUrl}/api/admin/outreach/overview?limit=5`, { headers }),
+        fetch(`${apiUrl}/api/admin/outreach/followup-history`, { headers }),
       ]);
 
       if (!statsRes.ok || !topRes.ok) {
@@ -73,6 +101,14 @@ export default function AdminOverviewPage() {
 
       setStats(await statsRes.json());
       setTopUrls(await topRes.json());
+      if (outreachRes.ok) {
+        const od = await outreachRes.json();
+        setOutreachSummary(od.summary || null);
+      }
+      if (historyRes.ok) {
+        const hd = await historyRes.json();
+        setFollowUpHistory(hd.summary || null);
+      }
       setLastRefreshed(new Date().toISOString());
     } catch (err: any) {
       setError(err.message || 'Failed to load admin data');
@@ -263,6 +299,60 @@ export default function AdminOverviewPage() {
           </div>
         </div>
       </div>
+
+      {/* Outreach KPIs */}
+      {(outreachSummary || followUpHistory) && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Outreach Performance</h3>
+            <Link href="/admin/outreach" className="flex items-center gap-1 text-xs text-brand-400 hover:text-brand-300 transition-colors">
+              View full dashboard <ArrowUpRight className="h-3 w-3" />
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+            {outreachSummary && (
+              <>
+                <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2"><Mail className="h-4 w-4 text-slate-400" /><span className="text-xs text-slate-500 uppercase tracking-wider">Sent</span></div>
+                  <div className="text-2xl font-bold text-white">{outreachSummary.sentCount}</div>
+                </div>
+                <div className="bg-green-500/5 border border-green-500/15 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2"><Eye className="h-4 w-4 text-green-400" /><span className="text-xs text-slate-500 uppercase tracking-wider">Open Rate</span></div>
+                  <div className="text-2xl font-bold text-green-400">{outreachSummary.openRate}%</div>
+                  <div className="text-[11px] text-slate-600 mt-0.5">{outreachSummary.openedCount} opened</div>
+                </div>
+                <div className="bg-cyan-500/5 border border-cyan-500/15 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2"><MousePointerClick className="h-4 w-4 text-cyan-400" /><span className="text-xs text-slate-500 uppercase tracking-wider">Click Rate</span></div>
+                  <div className="text-2xl font-bold text-cyan-400">{outreachSummary.clickRate}%</div>
+                  <div className="text-[11px] text-slate-600 mt-0.5">{outreachSummary.clickedCount} clicked</div>
+                </div>
+                <div className="bg-red-500/5 border border-red-500/15 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2"><Flame className="h-4 w-4 text-red-400" /><span className="text-xs text-slate-500 uppercase tracking-wider">Hot Leads</span></div>
+                  <div className="text-2xl font-bold text-red-400">{outreachSummary.hotLeadCount}</div>
+                  <div className="text-[11px] text-slate-600 mt-0.5">{outreachSummary.followUpsScheduled} queued</div>
+                </div>
+              </>
+            )}
+            {followUpHistory && (
+              <>
+                <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2"><RotateCcw className="h-4 w-4 text-slate-400" /><span className="text-xs text-slate-500 uppercase tracking-wider">Follow-ups</span></div>
+                  <div className="text-2xl font-bold text-white">{followUpHistory.total}</div>
+                  <div className="text-[11px] text-slate-600 mt-0.5">total tracked</div>
+                </div>
+                <div className="bg-green-500/5 border border-green-500/15 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2"><CheckCircle2 className="h-4 w-4 text-green-400" /><span className="text-xs text-slate-500 uppercase tracking-wider">Sent</span></div>
+                  <div className="text-2xl font-bold text-green-400">{followUpHistory.sent}</div>
+                </div>
+                <div className="bg-amber-500/5 border border-amber-500/15 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2"><CalendarClock className="h-4 w-4 text-amber-400" /><span className="text-xs text-slate-500 uppercase tracking-wider">Scheduled</span></div>
+                  <div className="text-2xl font-bold text-amber-400">{followUpHistory.scheduled}</div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Quick Links */}
       <div>

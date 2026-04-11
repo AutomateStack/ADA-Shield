@@ -57,7 +57,7 @@ const formatDate = (dateString: string | null): string => {
 type LeadStatus = 'cold' | 'warm' | 'hot';
 type FollowUpStatus = 'none' | 'scheduled' | 'sent' | 'skipped' | 'canceled';
 type EventType = 'sent' | 'open' | 'click' | 'follow_up_scheduled' | 'follow_up_sent' | 'follow_up_canceled' | string;
-type Tab = 'overview' | 'clicks' | 'followup';
+type Tab = 'overview' | 'clicks' | 'followup' | 'history';
 
 interface ContactEntry {
   id: string;
@@ -184,6 +184,35 @@ interface FollowUpSite {
   totalOpens: number;
   totalClicks: number;
   lastEngagementAt: string | null;
+}
+
+interface FollowUpHistoryItem {
+  id: string;
+  siteId: string;
+  siteName: string | null;
+  siteUrl: string | null;
+  ownerEmail: string | null;
+  recipientEmail: string;
+  subject: string;
+  followUpStatus: FollowUpStatus;
+  followUpRule: string | null;
+  followUpScheduledFor: string | null;
+  followUpSentAt: string | null;
+  followUpAttempts: number;
+  opensCount: number;
+  clicksCount: number;
+  leadScore: number;
+  leadStatus: LeadStatus;
+  lastEngagementAt: string | null;
+  sentAt: string;
+}
+
+interface FollowUpHistorySummary {
+  total: number;
+  sent: number;
+  scheduled: number;
+  skipped: number;
+  canceled: number;
 }
 
 interface ScheduledFollowUp {
@@ -468,6 +497,14 @@ export default function AdminOutreachPage() {
   const [scheduledError, setScheduledError] = useState('');
   const [scheduledLoaded, setScheduledLoaded] = useState(false);
 
+  // Follow-up history state
+  const [historyItems, setHistoryItems] = useState<FollowUpHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [historyStatusFilter, setHistoryStatusFilter] = useState<'all' | FollowUpStatus>('all');
+  const [historySummary, setHistorySummary] = useState<FollowUpHistorySummary | null>(null);
+
   // UI controls & filters
   const [leadsSearch, setLeadsSearch] = useState('');
   const [followUpMinDays, setFollowUpMinDays] = useState(10);
@@ -553,6 +590,24 @@ export default function AdminOutreachPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiUrl, adminSecret]);
 
+  const fetchFollowUpHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    setHistoryError('');
+    try {
+      const res = await fetch(`${apiUrl}/api/admin/outreach/followup-history`, { headers });
+      if (!res.ok) throw new Error('Failed to fetch follow-up history');
+      const data = await res.json();
+      setHistoryItems(data.items || []);
+      setHistorySummary(data.summary || null);
+      setHistoryLoaded(true);
+    } catch (err: any) {
+      setHistoryError(err.message || 'Failed to load follow-up history');
+    } finally {
+      setHistoryLoading(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiUrl, adminSecret]);
+
   // Load overview on mount; load other tabs lazily when first visited
   useEffect(() => { fetchOverview(); }, [fetchOverview]);
 
@@ -560,6 +615,7 @@ export default function AdminOutreachPage() {
     if (activeTab === 'clicks' && !clickData && !clickLoading) fetchClickAnalytics();
     if (activeTab === 'followup' && followUpSites.length === 0 && !followUpLoading) fetchFollowUpQueue();
     if (activeTab === 'followup' && !scheduledLoaded && !scheduledLoading) fetchScheduled();
+    if (activeTab === 'history' && !historyLoaded && !historyLoading) fetchFollowUpHistory();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
@@ -586,13 +642,20 @@ export default function AdminOutreachPage() {
     }
   };
 
-  const currentRefresh = activeTab === 'overview' ? fetchOverview : activeTab === 'clicks' ? fetchClickAnalytics : () => { fetchFollowUpQueue(); fetchScheduled(); };
-  const isLoading = activeTab === 'overview' ? overviewLoading : activeTab === 'clicks' ? clickLoading : followUpLoading || scheduledLoading;
+  const currentRefresh = activeTab === 'overview' ? fetchOverview
+    : activeTab === 'clicks' ? fetchClickAnalytics
+    : activeTab === 'history' ? fetchFollowUpHistory
+    : () => { fetchFollowUpQueue(); fetchScheduled(); };
+  const isLoading = activeTab === 'overview' ? overviewLoading
+    : activeTab === 'clicks' ? clickLoading
+    : activeTab === 'history' ? historyLoading
+    : followUpLoading || scheduledLoading;
 
   const TABS: Array<{ key: Tab; label: string; icon: React.ElementType; count?: number }> = [
     { key: 'overview', label: 'Overview', icon: Mail },
     { key: 'clicks', label: 'Click Analysis', icon: MousePointerClick, count: clickData?.funnel.clicked },
     { key: 'followup', label: 'Follow-up Queue', icon: RotateCcw, count: (followUpSites.filter(s => s.hasEmail && !sentSiteIds.has(s.siteId)).length + scheduledItems.filter(s => s.overdue).length) || undefined },
+    { key: 'history', label: 'Follow-up History', icon: ArrowRight, count: historySummary?.sent || undefined },
   ];
 
   // ── Derived / filtered data ────────────────────────────────────────────────
@@ -1235,6 +1298,142 @@ export default function AdminOutreachPage() {
       )}
 
       {/* â”€â”€ Detail modal (email body) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── FOLLOW-UP HISTORY TAB ──────────────────────────────────────────────────── */}
+      {activeTab === 'history' && (
+        <>
+          {historyError && (
+            <div className="flex items-center gap-3 p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-300 text-sm">
+              <AlertCircle className="h-4 w-4 flex-shrink-0" />{historyError}
+            </div>
+          )}
+          {historyLoading && !historyLoaded && (
+            <div className="flex items-center justify-center py-16 text-slate-400">
+              <RefreshCw className="h-5 w-5 animate-spin mr-2" />Loading follow-up history…
+            </div>
+          )}
+          {historyLoaded && historySummary && (
+            <>
+              {/* Summary stat cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                {[
+                  { label: 'Total', value: historySummary.total, color: 'text-white', bg: 'bg-white/5', border: 'border-white/10', icon: <RotateCcw className="h-4 w-4 text-slate-400" /> },
+                  { label: 'Sent', value: historySummary.sent, color: 'text-green-400', bg: 'bg-green-500/5', border: 'border-green-500/20', icon: <CheckCircle2 className="h-4 w-4 text-green-400" /> },
+                  { label: 'Scheduled', value: historySummary.scheduled, color: 'text-amber-400', bg: 'bg-amber-500/5', border: 'border-amber-500/20', icon: <CalendarClock className="h-4 w-4 text-amber-400" /> },
+                  { label: 'Skipped', value: historySummary.skipped, color: 'text-slate-400', bg: 'bg-white/5', border: 'border-white/10', icon: <XCircle className="h-4 w-4 text-slate-500" /> },
+                  { label: 'Canceled', value: historySummary.canceled, color: 'text-red-400', bg: 'bg-red-500/5', border: 'border-red-500/20', icon: <XCircle className="h-4 w-4 text-red-400" /> },
+                ].map((s) => (
+                  <div key={s.label} className={`rounded-xl border ${s.border} ${s.bg} p-4`}>
+                    <div className="flex items-center gap-2 mb-2">{s.icon}<span className="text-xs uppercase tracking-wider text-slate-500">{s.label}</span></div>
+                    <div className={`text-2xl font-bold ${s.color}`}>{s.value}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Filter bar */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-slate-500">Filter:</span>
+                {(['all', 'sent', 'scheduled', 'skipped', 'canceled'] as const).map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setHistoryStatusFilter(s)}
+                    className={`px-3 py-1.5 text-xs rounded-lg font-medium capitalize transition-colors ${
+                      historyStatusFilter === s
+                        ? 'bg-brand-500/20 text-brand-300 border border-brand-500/30'
+                        : 'text-slate-500 bg-white/5 border border-white/10 hover:text-slate-300'
+                    }`}
+                  >
+                    {s === 'all' ? `All (${historySummary.total})` : s}
+                  </button>
+                ))}
+              </div>
+
+              {/* History list */}
+              {(() => {
+                const filtered = historyStatusFilter === 'all'
+                  ? historyItems
+                  : historyItems.filter((i) => i.followUpStatus === historyStatusFilter);
+
+                const RULE_LABELS: Record<string, string> = {
+                  no_open: 'No open after 72h',
+                  opened_no_click: 'Opened — no click after 24h',
+                  clicked_report: 'Clicked report — check-in after 48h',
+                };
+
+                return filtered.length === 0 ? (
+                  <div className="rounded-xl border border-white/10 bg-white/5 px-5 py-12 text-center">
+                    <RotateCcw className="h-8 w-8 text-slate-600 mx-auto mb-3" />
+                    <p className="text-slate-400 text-sm">No follow-ups match this filter</p>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-white/10 bg-white/5 overflow-hidden">
+                    <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
+                      <div>
+                        <h2 className="text-sm font-semibold text-white">Follow-up Log</h2>
+                        <p className="text-xs text-slate-400 mt-0.5">All outreach contacts with an active follow-up action</p>
+                      </div>
+                      <span className="text-xs text-slate-500 bg-white/5 px-2 py-1 rounded-full">{filtered.length} entries</span>
+                    </div>
+                    <div className="divide-y divide-white/5">
+                      {filtered.map((item) => {
+                        const statusCfg = item.followUpStatus === 'sent'
+                          ? { bg: 'bg-green-500/10', text: 'text-green-400', icon: CheckCircle2, label: 'Sent' }
+                          : item.followUpStatus === 'scheduled'
+                          ? { bg: 'bg-amber-500/10', text: 'text-amber-400', icon: CalendarClock, label: 'Scheduled' }
+                          : item.followUpStatus === 'canceled'
+                          ? { bg: 'bg-red-500/10', text: 'text-red-400', icon: XCircle, label: 'Canceled' }
+                          : { bg: 'bg-slate-500/10', text: 'text-slate-500', icon: XCircle, label: 'Skipped' };
+                        const StatusIcon = statusCfg.icon;
+                        return (
+                          <div key={item.id} className="px-5 py-4 hover:bg-white/[0.03] transition-colors">
+                            <div className="flex items-start gap-4">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-sm font-medium text-slate-200 truncate">{item.siteName || item.siteUrl || item.recipientEmail}</span>
+                                  <LeadBadge status={item.leadStatus} score={item.leadScore} />
+                                  <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium ${statusCfg.bg} ${statusCfg.text}`}>
+                                    <StatusIcon className="h-3 w-3" />{statusCfg.label}
+                                  </span>
+                                  {item.followUpAttempts > 1 && (
+                                    <span className="text-[11px] text-slate-500 bg-white/5 rounded px-1.5 py-0.5">{item.followUpAttempts} attempts</span>
+                                  )}
+                                </div>
+                                <div className="flex flex-wrap gap-3 mt-1 text-[11px] text-slate-500">
+                                  {item.siteUrl && <span className="flex items-center gap-1"><Globe className="h-3 w-3" /><span className="truncate max-w-xs">{item.siteUrl}</span></span>}
+                                  <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{item.recipientEmail}</span>
+                                </div>
+                                <div className="mt-1.5 text-[11px] text-slate-500 truncate">Re: {item.subject}</div>
+                                <div className="mt-1.5 flex flex-wrap gap-4 text-[11px]">
+                                  {item.followUpRule && (
+                                    <span className="flex items-center gap-1 text-brand-400/70">
+                                      <Clock className="h-3 w-3" />{RULE_LABELS[item.followUpRule] ?? item.followUpRule.replace(/_/g, ' ')}
+                                    </span>
+                                  )}
+                                  {item.opensCount > 0 && <span className="flex items-center gap-1 text-green-400/70"><Eye className="h-3 w-3" />{item.opensCount} opens</span>}
+                                  {item.clicksCount > 0 && <span className="flex items-center gap-1 text-cyan-400/70"><MousePointerClick className="h-3 w-3" />{item.clicksCount} clicks</span>}
+                                  {item.followUpSentAt && <span className="text-slate-500">Follow-up sent {formatRelativeTime(item.followUpSentAt)}</span>}
+                                  {!item.followUpSentAt && item.followUpScheduledFor && (
+                                    <span className="flex items-center gap-1 text-amber-400/70"><CalendarClock className="h-3 w-3" />Due {formatDate(item.followUpScheduledFor)}</span>
+                                  )}
+                                  {item.lastEngagementAt && <span className="text-slate-600">Last active {formatRelativeTime(item.lastEngagementAt)}</span>}
+                                </div>
+                              </div>
+                              <div className="flex-shrink-0 text-right">
+                                <div className="text-[11px] text-slate-600">{formatRelativeTime(item.sentAt)}</div>
+                                <div className="text-[10px] text-slate-700 mt-0.5">original send</div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+            </>
+          )}
+        </>
+      )}
+
       {detailModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={(e) => e.target === e.currentTarget && setDetailModal(null)}>
           <div className="bg-slate-900 border border-white/10 rounded-xl max-w-2xl w-full shadow-2xl">
