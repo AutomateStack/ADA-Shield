@@ -1065,6 +1065,62 @@ async function getScheduledFollowUps({ limit = 100 } = {}) {
   }
 }
 
+/**
+ * Returns all outreach entries that have had follow-up actions (any status ≠ 'none'),
+ * with a summary count breakdown by status.
+ */
+async function getFollowUpHistory({ limit = 200, status } = {}) {
+  try {
+    let query = supabase
+      .from('site_contact_history')
+      .select('id, site_id, recipient_email, subject, follow_up_status, follow_up_rule, follow_up_scheduled_for, follow_up_sent_at, follow_up_attempts, opens_count, clicks_count, lead_score, lead_status, last_engagement_at, created_at, sites(id, name, url, owner_email)')
+      .neq('follow_up_status', 'none')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (status) {
+      query = query.eq('follow_up_status', status);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const items = (data || []).map((entry) => ({
+      id: entry.id,
+      siteId: entry.site_id,
+      siteName: entry.sites?.name || null,
+      siteUrl: entry.sites?.url || null,
+      ownerEmail: entry.sites?.owner_email || entry.recipient_email || null,
+      recipientEmail: entry.recipient_email,
+      subject: entry.subject,
+      followUpStatus: entry.follow_up_status,
+      followUpRule: entry.follow_up_rule || null,
+      followUpScheduledFor: entry.follow_up_scheduled_for || null,
+      followUpSentAt: entry.follow_up_sent_at || null,
+      followUpAttempts: entry.follow_up_attempts || 0,
+      opensCount: entry.opens_count || 0,
+      clicksCount: entry.clicks_count || 0,
+      leadScore: entry.lead_score || 0,
+      leadStatus: entry.lead_status || 'cold',
+      lastEngagementAt: entry.last_engagement_at || null,
+      sentAt: entry.created_at,
+    }));
+
+    const summary = {
+      total: items.length,
+      sent: items.filter((i) => i.followUpStatus === 'sent').length,
+      scheduled: items.filter((i) => i.followUpStatus === 'scheduled').length,
+      skipped: items.filter((i) => i.followUpStatus === 'skipped').length,
+      canceled: items.filter((i) => i.followUpStatus === 'canceled').length,
+    };
+
+    return { items, summary };
+  } catch (error) {
+    logger.error('Failed to get follow-up history', { error: error.message });
+    throw error;
+  }
+}
+
 async function getFollowUpDueSites({ minDays = 10, limit = 100 } = {}) {
   try {
     const cutoff = new Date(Date.now() - minDays * 24 * 60 * 60 * 1000).toISOString();
@@ -1174,5 +1230,6 @@ module.exports = {
   getOutreachOverview,
   getOutreachClickAnalytics,
   getScheduledFollowUps,
+  getFollowUpHistory,
   getFollowUpDueSites,
 };
