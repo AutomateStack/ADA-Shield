@@ -1020,6 +1020,51 @@ async function getOutreachClickAnalytics({ limit = 50 } = {}) {
  * - Last contact was >= minDays ago (default 10)
  * - Joined with latest outreach entry per site for engagement context
  */
+async function getScheduledFollowUps({ limit = 100 } = {}) {
+  try {
+    const { data, error } = await supabase
+      .from('site_contact_history')
+      .select('id, site_id, recipient_email, subject, follow_up_status, follow_up_scheduled_for, follow_up_rule, lead_score, lead_status, opens_count, clicks_count, last_engagement_at, created_at, sites(id, name, url, owner_email)')
+      .eq('follow_up_status', 'scheduled')
+      .not('follow_up_scheduled_for', 'is', null)
+      .order('follow_up_scheduled_for', { ascending: true })
+      .limit(limit);
+
+    if (error) throw error;
+
+    const now = new Date();
+    const items = (data || []).map((entry) => {
+      const scheduledAt = new Date(entry.follow_up_scheduled_for);
+      const overdue = scheduledAt < now;
+      const minsUntil = Math.round((scheduledAt.getTime() - now.getTime()) / 60000);
+      return {
+        id: entry.id,
+        siteId: entry.site_id,
+        siteName: entry.sites?.name || null,
+        siteUrl: entry.sites?.url || null,
+        ownerEmail: entry.sites?.owner_email || entry.recipient_email || null,
+        recipientEmail: entry.recipient_email,
+        subject: entry.subject,
+        leadScore: entry.lead_score || 0,
+        leadStatus: entry.lead_status || 'cold',
+        opensCount: entry.opens_count || 0,
+        clicksCount: entry.clicks_count || 0,
+        followUpRule: entry.follow_up_rule || null,
+        followUpScheduledFor: entry.follow_up_scheduled_for,
+        lastEngagementAt: entry.last_engagement_at || null,
+        sentAt: entry.created_at,
+        overdue,
+        minsUntil,
+      };
+    });
+
+    return { items, total: items.length, overdueCount: items.filter((i) => i.overdue).length };
+  } catch (error) {
+    logger.error('Failed to get scheduled follow-ups', { error: error.message });
+    throw error;
+  }
+}
+
 async function getFollowUpDueSites({ minDays = 10, limit = 100 } = {}) {
   try {
     const cutoff = new Date(Date.now() - minDays * 24 * 60 * 60 * 1000).toISOString();
@@ -1128,5 +1173,6 @@ module.exports = {
   getSiteOutreachAnalytics,
   getOutreachOverview,
   getOutreachClickAnalytics,
+  getScheduledFollowUps,
   getFollowUpDueSites,
 };

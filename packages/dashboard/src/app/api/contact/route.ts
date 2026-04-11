@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const EMAIL_FROM = process.env.EMAIL_FROM || 'ADA Shield <info@wealthtalks.in>';
-const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'info@wealthtalks.in';
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'tthirmal@gmail.com';
 
 export async function POST(req: NextRequest) {
   try {

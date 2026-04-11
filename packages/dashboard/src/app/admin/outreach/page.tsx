@@ -186,6 +186,26 @@ interface FollowUpSite {
   lastEngagementAt: string | null;
 }
 
+interface ScheduledFollowUp {
+  id: string;
+  siteId: string;
+  siteName: string | null;
+  siteUrl: string | null;
+  ownerEmail: string | null;
+  recipientEmail: string;
+  subject: string;
+  leadScore: number;
+  leadStatus: LeadStatus;
+  opensCount: number;
+  clicksCount: number;
+  followUpRule: string | null;
+  followUpScheduledFor: string;
+  lastEngagementAt: string | null;
+  sentAt: string;
+  overdue: boolean;
+  minsUntil: number;
+}
+
 // â”€â”€â”€ Event display config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const EVENT_CONFIG: Record<
@@ -442,6 +462,12 @@ export default function AdminOutreachPage() {
   const [followUpModal, setFollowUpModal] = useState<FollowUpSite | null>(null);
   const [sentSiteIds, setSentSiteIds] = useState<Set<string>>(new Set());
 
+  // Scheduled follow-ups state
+  const [scheduledItems, setScheduledItems] = useState<ScheduledFollowUp[]>([]);
+  const [scheduledLoading, setScheduledLoading] = useState(false);
+  const [scheduledError, setScheduledError] = useState('');
+  const [scheduledLoaded, setScheduledLoaded] = useState(false);
+
   // UI controls & filters
   const [leadsSearch, setLeadsSearch] = useState('');
   const [followUpMinDays, setFollowUpMinDays] = useState(10);
@@ -510,12 +536,30 @@ export default function AdminOutreachPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiUrl, adminSecret, followUpMinDays]);
 
+  const fetchScheduled = useCallback(async () => {
+    setScheduledLoading(true);
+    setScheduledError('');
+    try {
+      const res = await fetch(`${apiUrl}/api/admin/outreach/followup-scheduled`, { headers });
+      if (!res.ok) throw new Error('Failed to fetch scheduled follow-ups');
+      const data = await res.json();
+      setScheduledItems(data.items || []);
+      setScheduledLoaded(true);
+    } catch (err: any) {
+      setScheduledError(err.message || 'Failed to load scheduled follow-ups');
+    } finally {
+      setScheduledLoading(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiUrl, adminSecret]);
+
   // Load overview on mount; load other tabs lazily when first visited
   useEffect(() => { fetchOverview(); }, [fetchOverview]);
 
   useEffect(() => {
     if (activeTab === 'clicks' && !clickData && !clickLoading) fetchClickAnalytics();
     if (activeTab === 'followup' && followUpSites.length === 0 && !followUpLoading) fetchFollowUpQueue();
+    if (activeTab === 'followup' && !scheduledLoaded && !scheduledLoading) fetchScheduled();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
@@ -542,13 +586,13 @@ export default function AdminOutreachPage() {
     }
   };
 
-  const currentRefresh = activeTab === 'overview' ? fetchOverview : activeTab === 'clicks' ? fetchClickAnalytics : fetchFollowUpQueue;
-  const isLoading = activeTab === 'overview' ? overviewLoading : activeTab === 'clicks' ? clickLoading : followUpLoading;
+  const currentRefresh = activeTab === 'overview' ? fetchOverview : activeTab === 'clicks' ? fetchClickAnalytics : () => { fetchFollowUpQueue(); fetchScheduled(); };
+  const isLoading = activeTab === 'overview' ? overviewLoading : activeTab === 'clicks' ? clickLoading : followUpLoading || scheduledLoading;
 
   const TABS: Array<{ key: Tab; label: string; icon: React.ElementType; count?: number }> = [
     { key: 'overview', label: 'Overview', icon: Mail },
     { key: 'clicks', label: 'Click Analysis', icon: MousePointerClick, count: clickData?.funnel.clicked },
-    { key: 'followup', label: 'Follow-up Queue', icon: RotateCcw, count: followUpSites.filter(s => s.hasEmail && !sentSiteIds.has(s.siteId)).length || undefined },
+    { key: 'followup', label: 'Follow-up Queue', icon: RotateCcw, count: (followUpSites.filter(s => s.hasEmail && !sentSiteIds.has(s.siteId)).length + scheduledItems.filter(s => s.overdue).length) || undefined },
   ];
 
   // ── Derived / filtered data ────────────────────────────────────────────────
@@ -951,6 +995,104 @@ export default function AdminOutreachPage() {
               <AlertCircle className="h-4 w-4 flex-shrink-0" />{followUpError}
             </div>
           )}
+
+          {/* ── Scheduled Follow-ups Section ── */}
+          {scheduledLoading && !scheduledLoaded && (
+            <div className="flex items-center gap-2 py-4 text-slate-400 text-sm">
+              <RefreshCw className="h-4 w-4 animate-spin" />Loading scheduled follow-ups…
+            </div>
+          )}
+          {scheduledError && (
+            <div className="flex items-center gap-3 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-300 text-sm">
+              <AlertCircle className="h-4 w-4 flex-shrink-0" />{scheduledError}
+            </div>
+          )}
+          {scheduledLoaded && (
+            <div className="rounded-xl border border-white/10 bg-white/5 overflow-hidden">
+              <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <CalendarClock className="h-4 w-4 text-amber-400" />
+                  <div>
+                    <h2 className="text-sm font-semibold text-white">Scheduled Follow-ups</h2>
+                    <p className="text-xs text-slate-400 mt-0.5">Auto-queued by outreach rules — waiting to be sent</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {scheduledItems.filter(s => s.overdue).length > 0 && (
+                    <span className="text-xs font-semibold bg-red-500/20 text-red-300 px-2 py-0.5 rounded-full">
+                      {scheduledItems.filter(s => s.overdue).length} overdue
+                    </span>
+                  )}
+                  <span className="text-xs text-slate-500 bg-white/5 px-2 py-1 rounded-full">{scheduledItems.length} total</span>
+                </div>
+              </div>
+              {scheduledItems.length === 0 ? (
+                <div className="px-5 py-10 text-center">
+                  <CheckCircle2 className="h-7 w-7 text-green-500/50 mx-auto mb-3" />
+                  <p className="text-slate-400 text-sm">No follow-ups currently scheduled</p>
+                  <p className="text-slate-600 text-xs mt-1">Automated follow-up rules will queue items here when triggered.</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-white/5">
+                  {scheduledItems.map((item) => {
+                    const leadCfg = item.leadStatus === 'hot'
+                      ? { bg: 'bg-red-500/15', text: 'text-red-300', icon: Flame }
+                      : item.leadStatus === 'warm'
+                      ? { bg: 'bg-amber-500/15', text: 'text-amber-300', icon: TrendingUp }
+                      : { bg: 'bg-slate-500/15', text: 'text-slate-500', icon: null };
+                    const ruleFriendly = item.followUpRule === 'no_open'
+                      ? 'No open after 72h'
+                      : item.followUpRule === 'opened_no_click'
+                      ? 'Opened but no click after 24h'
+                      : item.followUpRule === 'clicked_report'
+                      ? 'Clicked report — check in after 48h'
+                      : item.followUpRule?.replace(/_/g, ' ') ?? 'Scheduled';
+                    return (
+                      <div key={item.id} className="px-5 py-4">
+                        <div className="flex items-start gap-3">
+                          <div className={`flex-shrink-0 mt-1.5 w-2 h-2 rounded-full ${item.overdue ? 'bg-red-400' : 'bg-amber-400'}`} />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-medium text-slate-200 truncate">{item.siteName || item.siteUrl || item.recipientEmail}</span>
+                              <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${leadCfg.bg} ${leadCfg.text}`}>
+                                {leadCfg.icon && <leadCfg.icon className="h-3 w-3" />}
+                                {item.leadScore} <span className="capitalize">{item.leadStatus}</span>
+                              </span>
+                              {item.overdue && (
+                                <span className="inline-flex items-center gap-1 text-[11px] text-red-300 bg-red-500/10 rounded px-1.5 py-0.5">
+                                  <AlertCircle className="h-3 w-3" /> Overdue
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-3 mt-1 text-[11px] text-slate-500">
+                              {item.siteUrl && <span className="flex items-center gap-1"><Globe className="h-3 w-3" /><span className="truncate max-w-xs">{item.siteUrl}</span></span>}
+                              <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{item.recipientEmail}</span>
+                            </div>
+                            <div className="flex flex-wrap gap-4 mt-1.5 text-[11px]">
+                              <span className="flex items-center gap-1">
+                                <CalendarClock className="h-3 w-3 text-amber-400/70" />
+                                <span className={item.overdue ? 'text-red-400' : 'text-amber-300/80'}>
+                                  {item.overdue
+                                    ? `${formatRelativeTime(item.followUpScheduledFor)} (overdue)`
+                                    : `Due ${formatRelativeTime(item.followUpScheduledFor)}`}
+                                </span>
+                              </span>
+                              <span className="text-slate-500">{ruleFriendly}</span>
+                              {item.opensCount > 0 && <span className="flex items-center gap-1 text-green-400/70"><Eye className="h-3 w-3" />{item.opensCount} opens</span>}
+                              {item.clicksCount > 0 && <span className="flex items-center gap-1 text-cyan-400/70"><MousePointerClick className="h-3 w-3" />{item.clicksCount} clicks</span>}
+                            </div>
+                            <p className="mt-1 text-[11px] text-slate-600 truncate">Re: {item.subject}</p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Re-engagement Queue ── */}
           {followUpLoading && followUpSites.length === 0 && (
             <div className="flex items-center justify-center py-16 text-slate-400">
               <RefreshCw className="h-5 w-5 animate-spin mr-2" />Loading follow-up queueâ€¦
