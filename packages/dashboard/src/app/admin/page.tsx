@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
@@ -158,7 +158,7 @@ export default function AdminOverviewPage() {
           icon={<Activity className="h-5 w-5 text-brand-400" />}
           label="Total Scans"
           value={stats.totalScans.toLocaleString()}
-          sub={`${stats.freeScans.toLocaleString()} free · ${stats.authenticatedScans.toLocaleString()} paid`}
+          sub={`${stats.freeScans.toLocaleString()} free Â· ${stats.authenticatedScans.toLocaleString()} paid`}
         />
         <StatCard
           icon={<Clock className="h-5 w-5 text-green-400" />}
@@ -200,10 +200,10 @@ export default function AdminOverviewPage() {
           </div>
           <p className="text-xs text-slate-500 mt-2">
             {stats.avgRiskScore >= 70
-              ? 'High average — many sites at lawsuit risk'
+              ? 'High average â€” many sites at lawsuit risk'
               : stats.avgRiskScore >= 40
-              ? 'Moderate average — some compliance gaps'
-              : 'Low average — sites generally compliant'}
+              ? 'Moderate average â€” some compliance gaps'
+              : 'Low average â€” sites generally compliant'}
           </p>
         </div>
 
@@ -352,145 +352,6 @@ function StatCard({
     <div className={`border rounded-xl p-5 transition-colors ${highlight ? 'bg-brand-500/5 border-brand-500/20' : 'bg-white/5 border-white/10'}`}>
       <div className="flex items-center gap-2 mb-3">
         {icon}
-        <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">{label}</span>
-      </div>
-      <div className="text-2xl font-bold text-white">{value}</div>
-      {sub && <p className="text-xs text-slate-500 mt-1">{sub}</p>}
-    </div>
-  );
-}
-          </p>
-        </div>
-        <button
-          onClick={fetchData}
-          className="flex items-center gap-2 px-4 py-2 text-sm bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10 rounded-lg transition-colors"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Refresh
-        </button>
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          icon={<Activity className="h-5 w-5 text-brand-400" />}
-          label="Total Scans"
-          value={stats.totalScans.toLocaleString()}
-          sub={`${stats.freeScans} free / ${stats.authenticatedScans} auth`}
-        />
-        <StatCard
-          icon={<Clock className="h-5 w-5 text-green-400" />}
-          label="Scans (24h)"
-          value={stats.scansLast24h.toLocaleString()}
-          sub={`${stats.scansLast7d} in last 7 days`}
-        />
-        <StatCard
-          icon={<Globe className="h-5 w-5 text-purple-400" />}
-          label="Registered Sites"
-          value={stats.totalSites.toLocaleString()}
-        />
-        <StatCard
-          icon={<CreditCard className="h-5 w-5 text-amber-400" />}
-          label="Active Subscriptions"
-          value={stats.activeSubscriptions.toLocaleString()}
-        />
-      </div>
-
-      {/* Secondary Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="bg-white/5 border border-white/10 rounded-xl p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <AlertTriangle className="h-5 w-5 text-red-400" />
-            <h3 className="text-sm font-medium text-slate-300">Avg Risk Score</h3>
-          </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-4xl font-bold text-white">{stats.avgRiskScore}</span>
-            <span className="text-sm text-slate-500">/ 100</span>
-          </div>
-          <div className="mt-3 w-full bg-white/10 rounded-full h-2">
-            <div
-              className={`h-2 rounded-full ${
-                stats.avgRiskScore >= 70
-                  ? 'bg-risk-high'
-                  : stats.avgRiskScore >= 40
-                  ? 'bg-risk-medium'
-                  : 'bg-risk-low'
-              }`}
-              style={{ width: `${Math.min(stats.avgRiskScore, 100)}%` }}
-            />
-          </div>
-        </div>
-
-        <div className="bg-white/5 border border-white/10 rounded-xl p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <TrendingUp className="h-5 w-5 text-green-400" />
-            <h3 className="text-sm font-medium text-slate-300">Free vs Paid Scans</h3>
-          </div>
-          <div className="flex gap-6">
-            <div>
-              <div className="text-2xl font-bold text-white">{stats.freeScans}</div>
-              <div className="text-xs text-slate-500">Free Scans</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-white">{stats.authenticatedScans}</div>
-              <div className="text-xs text-slate-500">Paid Scans</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-white">
-                {stats.totalScans > 0
-                  ? `${Math.round((stats.freeScans / stats.totalScans) * 100)}%`
-                  : '0%'}
-              </div>
-              <div className="text-xs text-slate-500">Free Rate</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Top Scanned URLs */}
-      <div className="bg-white/5 border border-white/10 rounded-xl">
-        <div className="px-6 py-4 border-b border-white/10 flex items-center gap-3">
-          <BarChart3 className="h-5 w-5 text-brand-400" />
-          <h3 className="text-sm font-semibold text-white">Top Scanned Sites</h3>
-        </div>
-        {topUrls.length === 0 ? (
-          <div className="px-6 py-8 text-center text-sm text-slate-500">
-            No scans recorded yet
-          </div>
-        ) : (
-          <div className="divide-y divide-white/5">
-            {topUrls.map((item, i) => (
-              <div key={item.hostname} className="px-6 py-3 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-slate-500 w-5 text-right">{i + 1}.</span>
-                  <span className="text-sm text-slate-300">{item.hostname}</span>
-                </div>
-                <span className="text-sm font-medium text-white">
-                  {item.scanCount} {item.scanCount === 1 ? 'scan' : 'scans'}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function StatCard({
-  icon,
-  label,
-  value,
-  sub,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  sub?: string;
-}) {
-  return (
-    <div className="bg-white/5 border border-white/10 rounded-xl p-5">
-      <div className="flex items-center gap-2 mb-3">{icon}
         <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">{label}</span>
       </div>
       <div className="text-2xl font-bold text-white">{value}</div>
