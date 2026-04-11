@@ -98,6 +98,11 @@ export function Footer() {
             <h3 className="text-sm font-semibold text-white mb-3">Legal</h3>
             <ul className="space-y-2 text-sm">
               <li>
+                <Link href="/contact" className="text-slate-400 hover:text-white transition-colors">
+                  Contact Us
+                </Link>
+              </li>
+              <li>
                 <Link href="/privacy" className="text-slate-400 hover:text-white transition-colors">
                   Privacy Policy
                 </Link>
