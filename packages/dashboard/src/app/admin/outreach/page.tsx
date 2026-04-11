@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   RefreshCw,
   Globe,
@@ -442,6 +442,21 @@ export default function AdminOutreachPage() {
   const [followUpModal, setFollowUpModal] = useState<FollowUpSite | null>(null);
   const [sentSiteIds, setSentSiteIds] = useState<Set<string>>(new Set());
 
+  // UI controls & filters
+  const [leadsSearch, setLeadsSearch] = useState('');
+  const [followUpMinDays, setFollowUpMinDays] = useState(10);
+  const [followUpFilter, setFollowUpFilter] = useState<'all' | 'hot' | 'warm' | 'cold'>('all');
+  const [followUpSort, setFollowUpSort] = useState<'days' | 'score'>('days');
+  const [clickSortBy, setClickSortBy] = useState<'clicks' | 'clickRate' | 'recency'>('clicks');
+
+  // Toast
+  const [toasts, setToasts] = useState<Array<{ id: string; message: string; type: 'success' | 'error' }>>([]);
+  const addToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
+    const id = Math.random().toString(36).slice(2);
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
+  }, []);
+
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
   const adminSecret = process.env.NEXT_PUBLIC_ADMIN_SECRET || '';
   const headers = { 'x-admin-secret': adminSecret };
@@ -483,7 +498,7 @@ export default function AdminOutreachPage() {
     setFollowUpLoading(true);
     setFollowUpError('');
     try {
-      const res = await fetch(`${apiUrl}/api/admin/outreach/followup-due?minDays=10`, { headers });
+      const res = await fetch(`${apiUrl}/api/admin/outreach/followup-due?minDays=${followUpMinDays}`, { headers });
       if (!res.ok) throw new Error('Failed to fetch follow-up queue');
       const data = await res.json();
       setFollowUpSites(data.sites || []);
@@ -493,7 +508,7 @@ export default function AdminOutreachPage() {
       setFollowUpLoading(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiUrl, adminSecret]);
+  }, [apiUrl, adminSecret, followUpMinDays]);
 
   // Load overview on mount; load other tabs lazily when first visited
   useEffect(() => { fetchOverview(); }, [fetchOverview]);
@@ -503,6 +518,12 @@ export default function AdminOutreachPage() {
     if (activeTab === 'followup' && followUpSites.length === 0 && !followUpLoading) fetchFollowUpQueue();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  // Re-fetch when minDays changes (only if we're on the follow-up tab)
+  useEffect(() => {
+    if (activeTab === 'followup') fetchFollowUpQueue();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [followUpMinDays]);
 
   // â”€â”€ Overview helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -514,8 +535,6 @@ export default function AdminOutreachPage() {
     try {
       const res = await fetch(`${apiUrl}/api/admin/sites/${lead.siteId}/outreach-analytics`, { headers });
       if (!res.ok) throw new Error();
-      setSiteAnalytics((p) => ({ ...p, [lead.siteId]: {} as SiteOutreachAnalytics }));
-      setSiteAnalytics((p) => ({ ...p, [lead.siteId]: null as any })); // force refetch fix
       const payload: SiteOutreachAnalytics = await res.json();
       setSiteAnalytics((p) => ({ ...p, [lead.siteId]: payload }));
     } catch { /* silently skip */ } finally {
@@ -531,6 +550,34 @@ export default function AdminOutreachPage() {
     { key: 'clicks', label: 'Click Analysis', icon: MousePointerClick, count: clickData?.funnel.clicked },
     { key: 'followup', label: 'Follow-up Queue', icon: RotateCcw, count: followUpSites.filter(s => s.hasEmail && !sentSiteIds.has(s.siteId)).length || undefined },
   ];
+
+  // ── Derived / filtered data ────────────────────────────────────────────────
+
+  const filteredLeads = useMemo(() => {
+    if (!overview) return [];
+    const q = leadsSearch.toLowerCase().trim();
+    if (!q) return overview.topLeads;
+    return overview.topLeads.filter((l) =>
+      (l.siteName || '').toLowerCase().includes(q) ||
+      (l.siteUrl || '').toLowerCase().includes(q) ||
+      l.recipientEmail.toLowerCase().includes(q)
+    );
+  }, [overview, leadsSearch]);
+
+  const sortedClickSites = useMemo(() => {
+    if (!clickData) return [];
+    const arr = [...clickData.sitesWithClicks];
+    if (clickSortBy === 'clickRate') return arr.sort((a, b) => b.clickRate - a.clickRate);
+    if (clickSortBy === 'recency') return arr.sort((a, b) => new Date(b.lastClickAt || 0).getTime() - new Date(a.lastClickAt || 0).getTime());
+    return arr; // default: by totalClicks (already sorted from API)
+  }, [clickData, clickSortBy]);
+
+  const filteredFollowUpSites = useMemo(() => {
+    let arr = [...followUpSites];
+    if (followUpFilter !== 'all') arr = arr.filter((s) => s.bestLeadStatus === followUpFilter);
+    if (followUpSort === 'score') arr.sort((a, b) => b.bestLeadScore - a.bestLeadScore);
+    return arr;
+  }, [followUpSites, followUpFilter, followUpSort]);
 
   return (
     <div className="space-y-6">
@@ -600,12 +647,22 @@ export default function AdminOutreachPage() {
 
               {/* Top leads */}
               <div className="rounded-xl border border-white/10 bg-white/5 overflow-hidden">
-                <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
-                  <div>
-                    <h2 className="text-sm font-semibold text-white">Top Leads by Engagement</h2>
-                    <p className="text-xs text-slate-400 mt-0.5">Expand a row to see full email history and activity timeline.</p>
+                <div className="px-5 py-4 border-b border-white/10">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-sm font-semibold text-white">Top Leads by Engagement</h2>
+                      <p className="text-xs text-slate-400 mt-0.5">Expand a row to see full email history and activity timeline.</p>
+                    </div>
+                    {overview.topLeads.length > 0 && <span className="text-xs text-slate-500 bg-white/5 px-2 py-1 rounded-full">{overview.topLeads.length} leads</span>}
                   </div>
-                  {overview.topLeads.length > 0 && <span className="text-xs text-slate-500 bg-white/5 px-2 py-1 rounded-full">{overview.topLeads.length} leads</span>}
+                  {overview.topLeads.length > 3 && (
+                    <input
+                      value={leadsSearch}
+                      onChange={(e) => setLeadsSearch(e.target.value)}
+                      placeholder="Filter by site, URL, or email…"
+                      className="mt-3 w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 transition-colors"
+                    />
+                  )}
                 </div>
                 {overview.topLeads.length === 0 ? (
                   <div className="px-5 py-12 text-center">
@@ -613,9 +670,13 @@ export default function AdminOutreachPage() {
                     <p className="text-slate-400 text-sm font-medium">No outreach activity yet</p>
                     <p className="text-slate-600 text-xs mt-1">Send a tracked email from the Sites tab to start building your lead pipeline.</p>
                   </div>
+                ) : filteredLeads.length === 0 ? (
+                  <div className="px-5 py-8 text-center">
+                    <p className="text-slate-500 text-xs">No leads match &ldquo;{leadsSearch}&rdquo;</p>
+                  </div>
                 ) : (
                   <div className="divide-y divide-white/5">
-                    {overview.topLeads.map((lead) => {
+                    {filteredLeads.map((lead) => {
                       const isOpen = expandedLead === lead.id;
                       const siteData = siteAnalytics[lead.siteId];
                       const isLoadingAnalytics = siteAnalyticsLoading[lead.siteId];
@@ -804,8 +865,8 @@ export default function AdminOutreachPage() {
                   </div>
                 ) : (
                   <div className="divide-y divide-white/5">
-                    {clickData.sitesWithClicks.map((site, idx) => {
-                      const maxClicks = clickData.sitesWithClicks[0]?.totalClicks || 1;
+                    {sortedClickSites.map((site, idx) => {
+                      const maxClicks = sortedClickSites.reduce((m, s) => Math.max(m, s.totalClicks), 1);
                       const barPct = Math.round((site.totalClicks / maxClicks) * 100);
                       return (
                         <div key={site.siteId} className="px-5 py-4">
@@ -901,7 +962,7 @@ export default function AdminOutreachPage() {
             <div className="flex items-start gap-3 p-4 bg-brand-500/5 border border-brand-500/15 rounded-xl">
               <RotateCcw className="h-5 w-5 text-brand-400 flex-shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-medium text-slate-300">10-Day Re-engagement Cycle</p>
+                <p className="text-sm font-medium text-slate-300">{followUpMinDays}-Day Re-engagement Cycle</p>
                 <p className="text-xs text-slate-500 mt-0.5">
                   Sites listed here were last contacted 10+ days ago and are eligible for a follow-up email. Each follow-up is tracked separately â€” opens and clicks will appear in the Overview and Click Analysis tabs.
                 </p>
@@ -913,24 +974,61 @@ export default function AdminOutreachPage() {
             <div className="rounded-xl border border-white/10 bg-white/5 px-5 py-12 text-center">
               <CheckCircle2 className="h-8 w-8 text-green-500/60 mx-auto mb-3" />
               <p className="text-slate-300 text-sm font-medium">No sites due for follow-up</p>
-              <p className="text-slate-600 text-xs mt-1">Sites that were contacted 10+ days ago will appear here.</p>
+              <p className="text-slate-600 text-xs mt-1">Sites contacted {followUpMinDays}+ days ago will appear here.</p>
             </div>
           ) : (
             <div className="rounded-xl border border-white/10 bg-white/5 overflow-hidden">
-              <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
-                <div>
-                  <h2 className="text-sm font-semibold text-white">Sites Due for Follow-up</h2>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Last contacted 10+ days ago. Sorted by oldest contact first.
-                  </p>
+              <div className="px-5 py-4 border-b border-white/10">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <h2 className="text-sm font-semibold text-white">Sites Due for Follow-up</h2>
+                    <p className="text-xs text-slate-400 mt-0.5">Last contacted {followUpMinDays}+ days ago.</p>
+                  </div>
+                  <span className="text-xs text-slate-500 bg-white/5 px-2 py-1 rounded-full">
+                    {filteredFollowUpSites.filter(s => !sentSiteIds.has(s.siteId)).length} eligible
+                  </span>
                 </div>
-                <span className="text-xs text-slate-500 bg-white/5 px-2 py-1 rounded-full">
-                  {followUpSites.filter(s => !sentSiteIds.has(s.siteId)).length} eligible
-                </span>
+                {/* Filter / sort controls */}
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-3">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-slate-500">Days:</span>
+                    {([7, 10, 14, 30] as const).map((d) => (
+                      <button key={d} onClick={() => setFollowUpMinDays(d)}
+                        className={`px-2.5 py-1 text-[11px] rounded-md font-medium transition-colors ${
+                          followUpMinDays === d ? 'bg-brand-500/20 text-brand-300' : 'text-slate-500 hover:text-slate-300'
+                        }`}
+                      >{d}d+</button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-slate-500">Status:</span>
+                    {(['all', 'hot', 'warm', 'cold'] as const).map((s) => (
+                      <button key={s} onClick={() => setFollowUpFilter(s)}
+                        className={`px-2.5 py-1 text-[11px] rounded-md font-medium capitalize transition-colors ${
+                          followUpFilter === s ? 'bg-brand-500/20 text-brand-300' : 'text-slate-500 hover:text-slate-300'
+                        }`}
+                      >{s}</button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-slate-500">Sort:</span>
+                    {([['days', 'Overdue'], ['score', 'Lead Score']] as const).map(([key, label]) => (
+                      <button key={key} onClick={() => setFollowUpSort(key)}
+                        className={`px-2.5 py-1 text-[11px] rounded-md font-medium transition-colors ${
+                          followUpSort === key ? 'bg-brand-500/20 text-brand-300' : 'text-slate-500 hover:text-slate-300'
+                        }`}
+                      >{label}</button>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               <div className="divide-y divide-white/5">
-                {followUpSites.map((site) => {
+                {filteredFollowUpSites.length === 0 ? (
+                  <div className="px-5 py-10 text-center">
+                    <p className="text-slate-500 text-xs">No {followUpFilter !== 'all' ? followUpFilter + ' ' : ''}leads match. Try a different filter.</p>
+                  </div>
+                ) : filteredFollowUpSites.map((site) => {
                   const alreadySent = sentSiteIds.has(site.siteId);
                   const leadCfg = site.bestLeadStatus === 'hot'
                     ? { bg: 'bg-red-500/15', text: 'text-red-300', icon: Flame }
@@ -987,7 +1085,7 @@ export default function AdminOutreachPage() {
                       </div>
                     </div>
                   );
-                })}
+                })})
               </div>
             </div>
           )}
@@ -1046,10 +1144,31 @@ export default function AdminOutreachPage() {
         <FollowUpModal
           site={followUpModal}
           onClose={() => setFollowUpModal(null)}
-          onSent={(siteId) => setSentSiteIds((prev) => { const next = new Set(prev); next.add(siteId); return next; })}
+          onSent={(siteId) => { setSentSiteIds((prev) => { const next = new Set(prev); next.add(siteId); return next; }); addToast('Follow-up email sent successfully!'); }}
           apiUrl={apiUrl}
           adminSecret={adminSecret}
         />
+      )}
+
+      {/* Toast notifications */}
+      {toasts.length > 0 && (
+        <div className="fixed bottom-4 right-4 z-[60] flex flex-col gap-2 pointer-events-none">
+          {toasts.map((toast) => (
+            <div
+              key={toast.id}
+              className={`flex items-center gap-2 px-4 py-3 rounded-lg shadow-2xl text-sm font-medium pointer-events-auto ${
+                toast.type === 'success'
+                  ? 'bg-green-900 border border-green-500/30 text-green-200'
+                  : 'bg-red-900 border border-red-500/30 text-red-200'
+              }`}
+            >
+              {toast.type === 'success'
+                ? <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                : <AlertCircle className="h-4 w-4 flex-shrink-0" />}
+              {toast.message}
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
