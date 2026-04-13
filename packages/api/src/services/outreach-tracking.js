@@ -224,6 +224,13 @@ function buildFollowUpContent({ rule, firstName, siteName, reportUrl, riskScore 
   const recipient = firstName || 'there';
   const scoreText = Number.isFinite(riskScore) ? `${riskScore}/100` : 'high';
 
+  if (rule === 'opened_repeat') {
+    return {
+      subject: `Your accessibility report for ${siteName || 'your website'}`,
+      message: `Hi ${recipient},\n\nI noticed you've been checking back on the accessibility report for your website — that's great to see.\n\nThe current risk score is still ${scoreText}. Here's the latest version of your report with prioritized fixes:\n${reportUrl}\n\nIf you want to go through the fixes together or have any questions, just reply to this email.\n\nThirmal\nADA Shield`,
+    };
+  }
+
   if (rule === 'opened_no_click') {
     return {
       subject: 'Following up on the accessibility report',

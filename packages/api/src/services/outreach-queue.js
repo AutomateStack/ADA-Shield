@@ -60,12 +60,12 @@ function initOutreachQueue() {
   return outreachQueue;
 }
 
-async function scheduleFollowUp({ contactHistoryId, rule, delayMs }) {
+async function scheduleFollowUp({ contactHistoryId, rule, delayMs, jobIdSuffix = '' }) {
   const queue = getOutreachQueue();
   if (!queue) return null;
 
   const safeDelay = Math.max(0, Number(delayMs || 0));
-  const jobId = `outreach-followup:${contactHistoryId}:${rule}`;
+  const jobId = `outreach-followup:${contactHistoryId}:${rule}${jobIdSuffix ? `:${jobIdSuffix}` : ''}`;
   const scheduledFor = new Date(Date.now() + safeDelay).toISOString();
 
   await queue.add(
@@ -102,14 +102,23 @@ function extractFirstName(ownerName) {
 
 function canSendFollowUp(contact, rule) {
   if (!contact || !contact.automation_enabled || contact.delivery_status !== 'sent') return false;
-  if (Number(contact.follow_up_attempts || 0) >= 1) return false;
+
+  // Hard cap: max 6 total follow-ups per contact to prevent spam
+  if (Number(contact.follow_up_attempts || 0) >= 6) return false;
 
   if (rule === 'no_open') {
+    // Only send if they have never opened
     return Number(contact.opens_count || 0) === 0;
   }
 
   if (rule === 'opened_no_click') {
+    // Opened but not yet clicked
     return Number(contact.opens_count || 0) > 0 && Number(contact.clicks_count || 0) === 0;
+  }
+
+  if (rule === 'opened_repeat') {
+    // Triggered at every 3rd open — just cap-check, scheduling already validated the timing
+    return true;
   }
 
   if (rule === 'clicked_report') {
@@ -226,12 +235,34 @@ function initOutreachWorker() {
         metadata: { automated: true, rule, parentContactHistoryId: contact.id },
       });
 
+      const newAttempts = Number(contact.follow_up_attempts || 0) + 1;
+
       await updateSiteContactHistoryEntry(contact.id, {
         follow_up_status: 'sent',
         follow_up_rule: rule,
         follow_up_sent_at: new Date().toISOString(),
-        follow_up_attempts: Number(contact.follow_up_attempts || 0) + 1,
+        follow_up_attempts: newAttempts,
       });
+
+      // If still not opened after this no_open follow-up, reschedule another 1-week check
+      // (max 4 no-open follow-ups = 4 weeks of attempts before stopping)
+      if (rule === 'no_open' && Number(contact.opens_count || 0) === 0 && newAttempts < 4) {
+        try {
+          await scheduleFollowUp({
+            contactHistoryId: contact.id,
+            rule: 'no_open',
+            delayMs: 7 * 24 * 60 * 60 * 1000,
+            jobIdSuffix: String(newAttempts),
+          });
+          await updateSiteContactHistoryEntry(contact.id, {
+            follow_up_status: 'scheduled',
+            follow_up_scheduled_for: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          });
+          logger.info('Rescheduled next no-open follow-up', { contactHistoryId: contact.id, attempt: newAttempts });
+        } catch (err) {
+          logger.warn('Failed to reschedule no-open follow-up', { contactHistoryId: contact.id, error: err.message });
+        }
+      }
 
       return {
         status: 'sent',

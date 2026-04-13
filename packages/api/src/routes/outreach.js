@@ -64,9 +64,18 @@ router.get('/open/:trackingToken.gif', async (req, res) => {
         ipAddressHash: hashIpAddress(getClientIp(req)),
       });
 
-      if (updated && Number(existing.opens_count || 0) === 0) {
-        await cancelFollowUp(updated.id, 'no_open').catch(() => false);
-        await scheduleTrackedFollowUp(updated, 'opened_no_click', 24 * 60 * 60 * 1000);
+      if (updated) {
+        const newOpensCount = Number(updated.opens_count || 0);
+
+        if (newOpensCount === 1) {
+          // First open: cancel the 1-week no-open job, schedule 2-day follow-up
+          await cancelFollowUp(updated.id, 'no_open').catch(() => false);
+          await scheduleTrackedFollowUp(updated, 'opened_no_click', 2 * 24 * 60 * 60 * 1000);
+        } else if (newOpensCount >= 3 && newOpensCount % 3 === 0) {
+          // Every 3rd open (3, 6, 9...): schedule re-engagement follow-up at 30 min delay
+          // to avoid duplicate triggers from the same session
+          await scheduleTrackedFollowUp(updated, 'opened_repeat', 30 * 60 * 1000);
+        }
       }
     }
   } catch (error) {
