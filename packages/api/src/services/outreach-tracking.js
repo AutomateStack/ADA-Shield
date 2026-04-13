@@ -75,12 +75,14 @@ function buildReportUrl(publicToken, options = {}) {
 }
 
 function buildTrackingUrls(trackingToken, reportUrl, options = {}) {
-  const apiBaseUrl = getApiBaseUrl(options);
+  // Use the dashboard domain so tracking URLs match the sending domain (adashield.net).
+  // The dashboard proxies these requests through to the API internally.
+  const dashboardBaseUrl = getDashboardBaseUrl(options);
 
   return {
     reportUrl,
-    trackedReportUrl: `${apiBaseUrl}/api/outreach/click/${trackingToken}`,
-    trackingPixelUrl: `${apiBaseUrl}/api/outreach/open/${trackingToken}.gif`,
+    trackedReportUrl: `${dashboardBaseUrl}/api/outreach/click/${trackingToken}`,
+    trackingPixelUrl: `${dashboardBaseUrl}/api/outreach/open/${trackingToken}.gif`,
   };
 }
 
