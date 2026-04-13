@@ -88,8 +88,8 @@ export default function PrivacyPolicyPage() {
           <Section title="8. Contact Us">
             <p>
               If you have questions about this Privacy Policy, please contact us at{' '}
-              <a href="mailto:tthirmal@gmail.com" className="text-brand-400 hover:text-brand-300">
-                tthirmal@gmail.com
+              <a href="mailto:audit@adashield.net" className="text-brand-400 hover:text-brand-300">
+                audit@adashield.net
               </a>.
             </p>
           </Section>

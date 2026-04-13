@@ -10,6 +10,11 @@ const QUEUE_NAME = 'accessibility-scans';
 let scanQueue = null;
 let scanWorker = null;
 
+function parsePositiveInt(value, fallback) {
+  const parsed = parseInt(String(value || ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 /**
  * Parses a Redis URL into a BullMQ-compatible connection object.
  * @param {string} redisUrl
@@ -126,6 +131,7 @@ function initScanWorker() {
 
   const connection = parseRedisUrl(redisUrl);
   const dashboardUrl = process.env.DASHBOARD_URL || 'http://localhost:3000';
+  const workerConcurrency = parsePositiveInt(process.env.SCAN_WORKER_CONCURRENCY, 2);
 
   scanWorker = new Worker(
     QUEUE_NAME,
@@ -219,14 +225,13 @@ function initScanWorker() {
         seriousCount: scanResult.seriousCount,
         moderateCount: scanResult.moderateCount,
         minorCount: scanResult.minorCount,
-        violations: scanResult.violations,
         passedRules: scanResult.passedRules,
         scanDurationMs: scanResult.scanDurationMs,
       };
     },
     {
       connection,
-      concurrency: 2,
+      concurrency: workerConcurrency,
       limiter: { max: 5, duration: 60000 },
     }
   );
@@ -239,7 +244,7 @@ function initScanWorker() {
     logger.error('Scan worker error', { error: err.message });
   });
 
-  logger.info('Scan worker initialised');
+  logger.info('Scan worker initialised', { concurrency: workerConcurrency });
   return scanWorker;
 }
 

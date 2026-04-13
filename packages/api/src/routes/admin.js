@@ -16,20 +16,62 @@ const {
   getLatestSiteScanSummary,
   markSiteAsContacted,
   createSiteContactHistoryEntry,
+  updateSiteContactHistoryEntry,
+  createSiteContactEvent,
   getSiteContactHistory,
+  getSiteOutreachAnalytics,
+  getOutreachOverview,
+  getOutreachClickAnalytics,
+  getScheduledFollowUps,
+  getFollowUpHistory,
+  getFollowUpDueSites,
 } = require('../db/admin');
 const { saveScanResult, updateSiteLastScanned } = require('../db/scans');
 const { createOrUpdateFreeScanSite } = require('../db/sites');
 const { invokeSupabaseFunction } = require('../services/supabase-functions');
 const { sendEmail, detectIndustry, getIndustryContext } = require('../services/email');
+const { scheduleFollowUp } = require('../services/outreach-queue');
+const {
+  buildTrackingUrls,
+  buildTrackedEmailHtml,
+  injectTrackedLink,
+  buildReportUrl,
+} = require('../services/outreach-tracking');
 
 const router = Router();
 
-const FIXED_ADMIN_CC_RECIPIENTS = [
-  'tthirmal@gmail.com',
-];
+const FIXED_ADMIN_CC_RECIPIENTS = [];
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const ADMIN_CACHE_TTL_MS = Math.max(1000, parseInt(process.env.ADMIN_CACHE_TTL_MS || '30000', 10) || 30000);
+const adminReadCache = new Map();
+
+function getCachedAdminValue(cacheKey, loader) {
+  const cached = adminReadCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) {
+    return Promise.resolve(cached.value);
+  }
+
+  return Promise.resolve(loader()).then((value) => {
+    adminReadCache.set(cacheKey, {
+      value,
+      expiresAt: now + ADMIN_CACHE_TTL_MS,
+    });
+    return value;
+  });
+}
+
+function getRequestOrigins(req) {
+  const dashboardOrigin = String(req.headers.origin || '').trim();
+  const requestHost = String(req.get('host') || '').trim();
+  const apiOrigin = requestHost ? `${req.protocol}://${requestHost}` : '';
+
+  return {
+    dashboardOrigin,
+    apiOrigin,
+  };
+}
 
 /**
  * Admin auth middleware — validates INTERNAL_API_SECRET header.
@@ -57,7 +99,7 @@ router.use(adminAuth);
 // ── Overview Stats ──────────────────────────────────────────────────
 router.get('/stats', async (req, res, next) => {
   try {
-    const stats = await getAdminStats();
+    const stats = await getCachedAdminValue('stats', () => getAdminStats());
     return res.json(stats);
   } catch (error) {
     next(error);
@@ -71,7 +113,8 @@ router.get('/scans', async (req, res, next) => {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const type = ['free', 'authenticated'].includes(req.query.type) ? req.query.type : undefined;
 
-    const result = await getAdminScans({ page, limit, type });
+    const cacheKey = `scans:${page}:${limit}:${type || 'all'}`;
+    const result = await getCachedAdminValue(cacheKey, () => getAdminScans({ page, limit, type }));
     return res.json(result);
   } catch (error) {
     next(error);
@@ -82,7 +125,8 @@ router.get('/scans', async (req, res, next) => {
 router.get('/scans/top-urls', async (req, res, next) => {
   try {
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 10));
-    const topUrls = await getTopScannedUrls(limit);
+    const cacheKey = `top-urls:${limit}`;
+    const topUrls = await getCachedAdminValue(cacheKey, () => getTopScannedUrls(limit));
     return res.json(topUrls);
   } catch (error) {
     next(error);
@@ -108,7 +152,8 @@ router.get('/users', async (req, res, next) => {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
 
-    const result = await getAdminUsers({ page, limit });
+    const cacheKey = `users:${page}:${limit}`;
+    const result = await getCachedAdminValue(cacheKey, () => getAdminUsers({ page, limit }));
     return res.json(result);
   } catch (error) {
     next(error);
@@ -122,6 +167,22 @@ router.get('/sites', async (req, res, next) => {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const sortBy = String(req.query.sortBy || 'created_at');
     const sortOrder = String(req.query.sortOrder || 'desc');
+
+    const normalizeDateBoundary = (value, boundary) => {
+      if (value === undefined || value === null) return undefined;
+      const raw = String(value).trim();
+      if (!raw) return undefined;
+
+      if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+        return boundary === 'start'
+          ? `${raw}T00:00:00.000Z`
+          : `${raw}T23:59:59.999Z`;
+      }
+
+      const parsed = new Date(raw);
+      if (Number.isNaN(parsed.getTime())) return undefined;
+      return parsed.toISOString();
+    };
     
     // Parse filter parameters
     let type = undefined;
@@ -139,7 +200,42 @@ router.get('/sites', async (req, res, next) => {
       risk = String(req.query.risk);
     }
 
-    const result = await getAdminSites({ page, limit, sortBy, sortOrder, type, contracted, risk });
+    const scannedFrom = normalizeDateBoundary(req.query.scannedFrom, 'start');
+    const scannedTo = normalizeDateBoundary(req.query.scannedTo, 'end');
+
+    if (scannedFrom && scannedTo && new Date(scannedFrom) > new Date(scannedTo)) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: {
+          scannedFrom: ['scannedFrom must be before or equal to scannedTo'],
+        },
+      });
+    }
+
+    const cacheKey = [
+      'sites',
+      page,
+      limit,
+      sortBy,
+      sortOrder,
+      type || 'all',
+      contracted === undefined ? 'all' : String(contracted),
+      risk || 'all',
+      scannedFrom || '',
+      scannedTo || '',
+    ].join(':');
+
+    const result = await getCachedAdminValue(cacheKey, () => getAdminSites({
+      page,
+      limit,
+      sortBy,
+      sortOrder,
+      type,
+      contracted,
+      risk,
+      scannedFrom,
+      scannedTo,
+    }));
     return res.json(result);
   } catch (error) {
     next(error);
@@ -205,6 +301,7 @@ router.patch('/sites/:siteId', async (req, res, next) => {
     }
 
     const updated = await updateAdminSiteMetadata(req.params.siteId, patch);
+    adminReadCache.clear();
     return res.json({ site: updated });
   } catch (error) {
     next(error);
@@ -392,7 +489,7 @@ function getEmailSendFailureMessage(rawMessage) {
     lower.includes('only send') && lower.includes('own email') ||
     lower.includes('onboarding@resend.dev')
   ) {
-    return 'Resend test mode restriction: onboarding@resend.dev can send only to limited/test recipients. Verify a custom domain and use EMAIL_FROM on that domain to send to any address.';
+    return 'Email sending failed. Please check your SMTP credentials (SMTP_USER / SMTP_PASS) in the environment variables.';
   }
 
   if (lower.includes('invalid') && lower.includes('email')) {
@@ -510,91 +607,52 @@ function buildTopIssuesSummary(violations, dashboardUrl) {
   };
 }
 
-function buildEmailTemplates({ firstName, siteName, issueText, riskScore, industry, topIssuesSummary }) {
-  const dashboardUrl = 'https://ada-shield-dashboard.vercel.app';
-  const supportLine = 'If you have any questions, you can reach me at tthirmal@gmail.com.';
+function buildEmailTemplates({ firstName, riskScore, reportUrl }) {
   const riskScoreText = Number.isFinite(riskScore) ? `${riskScore}/100` : 'elevated';
-  const { riskContext, callSignal } = getIndustryContext(industry);
-  const yearlyStats = getIndustryYearlyStatistics(industry);
 
   const templates = {
     fear_urgency: {
-      subject: `[noreply] ${siteName}: accessibility risk alert`,
+  subject: 'Quick heads-up about your website',
       message: `Hi ${firstName},
 
-I ran an ADA accessibility check for ${siteName} and found ${issueText} issues that can increase legal risk.
+I ran a quick accessibility check on your website and your risk score came out quite high (${riskScoreText}).
 
-Risk signal: ${riskScoreText}
-${yearlyStats}
+A few issues (like text contrast and missing labels) could make parts of your site difficult to use and potentially expose you to ADA-related complaints.
 
-Top 2 issues found (simple):
-${topIssuesSummary}
+I’ve put together a short report showing the exact fixes:
+${reportUrl}
 
-Why this matters:
-${riskContext}
-
-Recommended action:
-${callSignal}
-
-ADA Shield gives you:
-- 0-100 lawsuit risk score
-- Exact fix suggestions for each issue
-
-Run a fresh scan: ${dashboardUrl}
-
-${supportLine}
+No pressure, just sharing in case it helps you address this early.
 
 Thirmal
 ADA Shield`,
     },
     friendly_educational: {
-      subject: `[noreply] Quick accessibility snapshot for ${siteName}`,
+  subject: 'Small improvement opportunity for your website',
       message: `Hi ${firstName},
 
-I reviewed ${siteName} and found ${issueText} accessibility items worth fixing.
+I was reviewing your website and noticed a few accessibility improvements that could enhance user experience.
 
-${yearlyStats}
+Things like color contrast and image descriptions can impact how easily people navigate your site.
 
-Top 2 issues found (simple):
-${topIssuesSummary}
+I created a quick, free report with suggestions:
+${reportUrl}
 
-Accessibility improvements help reduce legal exposure and improve user experience for all visitors.
-
-Context:
-${riskContext}
-
-ADA Shield can help with:
-- 0-100 risk scoring
-- Prioritized, code-level fixes
-
-Run your scan here: ${dashboardUrl}
-
-${supportLine}
+Even small fixes here can make a noticeable difference.
 
 Thirmal
 ADA Shield`,
     },
     concise_direct: {
-      subject: `[noreply] ${siteName}: ADA risk snapshot`,
+  subject: 'Quick check on your website',
       message: `Hi ${firstName},
 
-I scanned ${siteName} and found ${issueText} ADA-related issues.
+I ran a quick accessibility scan on your website and found a couple of minor things you might want to review.
 
-Risk signal: ${riskScoreText}
-${yearlyStats}
+Here’s a short report:
+${reportUrl}
 
-Top 2 issues found (simple):
-${topIssuesSummary}
-
-Why this matters:
-${riskContext}
-
-Next step:
-${callSignal}
-
-Free scan: ${dashboardUrl}
-
-${supportLine}
+Thought I’d share, it’s free.
 
 Thirmal
 ADA Shield`,
@@ -606,6 +664,7 @@ ADA Shield`,
 
 router.get('/sites/:siteId/email-template', async (req, res, next) => {
   try {
+    const { dashboardOrigin } = getRequestOrigins(req);
     const site = await getSiteById(req.params.siteId);
     if (!site) {
       return res.status(404).json({ error: 'Site not found' });
@@ -617,17 +676,14 @@ router.get('/sites/:siteId/email-template', async (req, res, next) => {
     const issueCount = Number.isFinite(latestScan?.total_violations)
       ? latestScan.total_violations
       : 0;
-    const issueText = issueCount > 0 ? String(issueCount) : 'multiple';
     const industry = detectIndustry(site.url);
-    const dashboardUrl = 'https://ada-shield-dashboard.vercel.app';
-    const { summaryText: topIssuesSummary } = buildTopIssuesSummary(latestScan?.violations || [], dashboardUrl);
+    const reportUrl = buildReportUrl(latestScan?.public_token || null, {
+      dashboardBaseUrl: dashboardOrigin,
+    });
     const templates = buildEmailTemplates({
       firstName,
-      siteName,
-      issueText,
       riskScore: latestScan?.risk_score,
-      industry,
-      topIssuesSummary,
+      reportUrl,
     });
 
     const defaultStyle = pickDefaultTemplateStyle(latestScan?.risk_score);
@@ -653,6 +709,7 @@ router.get('/sites/:siteId/email-template', async (req, res, next) => {
         industryLabel: formatIndustryLabel(industry),
         issueCount: issueCount > 0 ? issueCount : null,
         riskScore: latestScan?.risk_score ?? null,
+        reportUrl,
       },
     });
   } catch (error) {
@@ -662,6 +719,7 @@ router.get('/sites/:siteId/email-template', async (req, res, next) => {
 
 router.post('/sites/:siteId/send-email', async (req, res, next) => {
   try {
+    const { dashboardOrigin, apiOrigin } = getRequestOrigins(req);
     const parsed = sendEmailSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({
@@ -674,17 +732,16 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
     if (!site) {
       return res.status(404).json({ error: 'Site not found' });
     }
+    if (!site.owner_email && (!site.notification_recipients || !site.notification_recipients.length)) {
+      return res.status(400).json({ error: 'Site has no owner email address and no notification recipients' });
+    }
 
+    const latestScan = await getLatestSiteScanSummary(req.params.siteId);
+    const reportUrl = buildReportUrl(latestScan?.public_token || null, {
+      dashboardBaseUrl: dashboardOrigin,
+    });
+    const sendBatchId = crypto.randomUUID();
 
-      // Allow sending without owner_email when extra recipients exist
-      if (!site.owner_email && (!site.notification_recipients || !site.notification_recipients.length)) {
-        return res.status(400).json({ error: 'Site has no owner email address and no notification recipients' });
-      }
-
-    let deliveryChannel = 'supabase-function';
-    let providerMessageId = null;
-
-    // Collect all site-related recipients for TO list (owner + notification recipients)
     const toRecipients = new Set();
     if (site.owner_email) toRecipients.add(site.owner_email);
     if (site.notification_recipients && Array.isArray(site.notification_recipients)) {
@@ -695,71 +752,162 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
       return res.status(400).json({ error: 'No recipient emails configured for this site' });
     }
 
-    // Fixed admin CC (only thermal for monitoring)
     const ccRecipients = FIXED_ADMIN_CC_RECIPIENTS;
     const toList = Array.from(toRecipients);
 
-    // Primary path: Supabase Edge Function (Resend)
-    // Fallback path: direct API-side sendEmail if function call fails.
-    try {
-      const response = await invokeSupabaseFunction('send-admin-email', {
-        to: toList,
-        cc: ccRecipients.length > 0 ? ccRecipients : undefined,
+    const sentResults = [];
+    const failures = [];
+
+    for (let index = 0; index < toList.length; index += 1) {
+      const recipient = toList[index];
+      const trackingToken = crypto.randomUUID();
+      const trackingUrls = buildTrackingUrls(trackingToken, reportUrl, {
+        apiBaseUrl: apiOrigin,
+      });
+      const trackedText = injectTrackedLink(
+        parsed.data.message,
+        `Here is your generated report: ${trackingUrls.reportUrl}`
+      );
+      const trackedHtml = buildTrackedEmailHtml({
         subject: parsed.data.subject,
         message: parsed.data.message,
-        siteId: site.id,
-        siteName: site.name,
+        siteName: site.name || site.url,
         siteUrl: site.url,
+        trackedReportUrl: trackingUrls.trackedReportUrl,
+        trackingPixelUrl: trackingUrls.trackingPixelUrl,
+        selfScanUrl: buildReportUrl(null, {
+          dashboardBaseUrl: dashboardOrigin,
+        }),
       });
-      providerMessageId = response?.messageId || null;
-    } catch (edgeError) {
-      logger.warn('Edge function send failed, using local email fallback', {
+
+      const contactEntry = await createSiteContactHistoryEntry({
         siteId: site.id,
-        to: toList.join(','),
-        cc: ccRecipients,
-        error: edgeError.message,
+        recipientEmail: recipient,
+        subject: parsed.data.subject,
+        message: trackedText,
+        templateStyle: parsed.data.templateStyle || null,
+        deliveryChannel: 'supabase-function',
+        deliveryStatus: 'sent',
+        providerMessageId: null,
+        sendBatchId,
+        scanId: latestScan?.id || null,
+        reportUrl: trackingUrls.reportUrl,
+        trackedReportUrl: trackingUrls.trackedReportUrl,
+        trackingPixelUrl: trackingUrls.trackingPixelUrl,
+        automationEnabled: true,
+        trackingToken,
       });
+
+      let deliveryChannel = 'supabase-function';
+      let providerMessageId = null;
 
       try {
-        deliveryChannel = 'api-fallback';
-        const fallbackResponse = await sendEmail({
-          to: toList,
+        const response = await invokeSupabaseFunction('send-admin-email', {
+          to: [recipient],
+          cc: index === 0 && ccRecipients.length > 0 ? ccRecipients : undefined,
           subject: parsed.data.subject,
-          text: parsed.data.message,
-          cc: ccRecipients,
+          message: trackedText,
+          text: trackedText,
+          html: trackedHtml,
+          siteId: site.id,
+          siteName: site.name,
+          siteUrl: site.url,
         });
-        providerMessageId = fallbackResponse?.id || null;
-      } catch (fallbackError) {
-        const providerMessage = fallbackError?.message || edgeError?.message || 'Failed to send email';
-        const userMessage = getEmailSendFailureMessage(providerMessage);
+        providerMessageId = response?.messageId || null;
+      } catch (edgeError) {
+        logger.warn('Edge function send failed, using local email fallback', {
+          siteId: site.id,
+          recipient,
+          error: edgeError.message,
+        });
 
-        return res.status(400).json({
-          error: userMessage,
-          details: providerMessage,
-             recipient: toList.join(','),
+        try {
+          deliveryChannel = 'api-fallback';
+          const fallbackResponse = await sendEmail({
+            to: [recipient],
+            subject: parsed.data.subject,
+            text: trackedText,
+            html: trackedHtml,
+            cc: index === 0 ? ccRecipients : undefined,
+          });
+          providerMessageId = fallbackResponse?.id || null;
+        } catch (fallbackError) {
+          const providerMessage = fallbackError?.message || edgeError?.message || 'Failed to send email';
+          await updateSiteContactHistoryEntry(contactEntry.id, {
+            delivery_status: 'failed',
+            delivery_channel: deliveryChannel,
+            follow_up_status: 'canceled',
+          });
+          failures.push({ recipient, message: providerMessage });
+          continue;
+        }
+      }
+
+      await updateSiteContactHistoryEntry(contactEntry.id, {
+        delivery_channel: deliveryChannel,
+        provider_message_id: providerMessageId,
+      });
+
+      await createSiteContactEvent({
+        siteId: site.id,
+        contactHistoryId: contactEntry.id,
+        eventType: 'sent',
+        metadata: {
+          automated: false,
+          sendBatchId,
+          recipient,
+        },
+      });
+
+      const scheduled = await scheduleFollowUp({
+        contactHistoryId: contactEntry.id,
+        rule: 'no_open',
+        delayMs: 72 * 60 * 60 * 1000,
+      });
+
+      if (scheduled) {
+        await updateSiteContactHistoryEntry(contactEntry.id, {
+          follow_up_status: 'scheduled',
+          follow_up_rule: 'no_open',
+          follow_up_scheduled_for: scheduled.scheduledFor,
+        });
+
+        await createSiteContactEvent({
+          siteId: site.id,
+          contactHistoryId: contactEntry.id,
+          eventType: 'follow_up_scheduled',
+          metadata: {
+            rule: 'no_open',
+            scheduledFor: scheduled.scheduledFor,
+          },
         });
       }
+
+      sentResults.push({
+        recipient,
+        contactHistoryId: contactEntry.id,
+        deliveryChannel,
+        providerMessageId,
+      });
     }
 
-    // Log the first recipient for contact history
-    const firstToRecipient = Array.from(toRecipients)[0];
-    await createSiteContactHistoryEntry({
-      siteId: site.id,
-         recipientEmail: firstToRecipient,
-      subject: parsed.data.subject,
-      message: parsed.data.message,
-      templateStyle: parsed.data.templateStyle || null,
-      deliveryChannel,
-      deliveryStatus: 'sent',
-      providerMessageId,
-    });
+    if (sentResults.length === 0) {
+      const providerMessage = failures[0]?.message || 'Failed to send email';
+      return res.status(400).json({
+        error: getEmailSendFailureMessage(providerMessage),
+        details: providerMessage,
+      });
+    }
 
-    // Mark site as contacted
     await markSiteAsContacted(req.params.siteId);
+    adminReadCache.clear();
 
-    return res.json({ 
-      success: true, 
-      message: 'Email sent and contact recorded' 
+    return res.json({
+      success: true,
+      message: failures.length > 0 ? 'Emails sent with some delivery failures' : 'Emails sent and tracking enabled',
+      sentCount: sentResults.length,
+      failedCount: failures.length,
+      failures,
     });
   } catch (error) {
     next(error);
@@ -791,13 +939,238 @@ router.get('/sites/:siteId/contact-history', async (req, res, next) => {
   }
 });
 
+router.get('/sites/:siteId/outreach-analytics', async (req, res, next) => {
+  try {
+    const site = await getSiteById(req.params.siteId);
+    if (!site) {
+      return res.status(404).json({ error: 'Site not found' });
+    }
+
+    const analytics = await getSiteOutreachAnalytics(req.params.siteId);
+    return res.json(analytics);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/outreach/overview', async (req, res, next) => {
+  try {
+    const limit = Math.min(20, Math.max(1, parseInt(req.query.limit, 10) || 10));
+    const cacheKey = `outreach-overview:${limit}`;
+    const result = await getCachedAdminValue(cacheKey, () => getOutreachOverview({ limit }));
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Outreach: Click Analytics ──────────────────────────────────────
+router.get('/outreach/click-analytics', async (req, res, next) => {
+  try {
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const cacheKey = `outreach-click-analytics:${limit}`;
+    const result = await getCachedAdminValue(cacheKey, () => getOutreachClickAnalytics({ limit }));
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Outreach: Follow-up History (all follow-up actions) ──────────
+router.get('/outreach/followup-history', async (req, res, next) => {
+  try {
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 200));
+    const status = req.query.status || undefined;
+    // Do NOT cache — must be fresh
+    const result = await getFollowUpHistory({ limit, status });
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Outreach: Scheduled Follow-ups ───────────────────────────────
+router.get('/outreach/followup-scheduled', async (req, res, next) => {
+  try {
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 100));
+    const result = await getScheduledFollowUps({ limit });
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Outreach: Follow-up Due Sites (10-day cycle) ───────────────────
+router.get('/outreach/followup-due', async (req, res, next) => {
+  try {
+    const minDays = Math.max(1, parseInt(req.query.minDays, 10) || 10);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 100));
+    // Do NOT cache — must be fresh for accurate eligibility
+    const result = await getFollowUpDueSites({ minDays, limit });
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Outreach: Send Manual Follow-up to Site ───────────────────────
+const manualFollowUpSchema = z.object({
+  subject: z.string().min(1).max(200),
+  message: z.string().min(1).max(5000),
+  templateStyle: z.string().optional(),
+});
+
+router.post('/sites/:siteId/send-followup', async (req, res, next) => {
+  try {
+    const { dashboardOrigin, apiOrigin } = getRequestOrigins(req);
+    const parsed = manualFollowUpSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+
+    const site = await getSiteById(req.params.siteId);
+    if (!site) {
+      return res.status(404).json({ error: 'Site not found' });
+    }
+
+    const toRecipients = new Set();
+    if (site.owner_email) toRecipients.add(site.owner_email);
+    if (Array.isArray(site.notification_recipients)) {
+      site.notification_recipients.forEach((e) => toRecipients.add(e));
+    }
+
+    if (toRecipients.size === 0) {
+      return res.status(400).json({ error: 'No recipient emails configured for this site' });
+    }
+
+    const latestScan = await getLatestSiteScanSummary(req.params.siteId);
+    const reportUrl = buildReportUrl(latestScan?.public_token || null, {
+      dashboardBaseUrl: dashboardOrigin,
+    });
+    const sendBatchId = crypto.randomUUID();
+    const toList = Array.from(toRecipients);
+    const sentResults = [];
+    const failures = [];
+
+    for (let index = 0; index < toList.length; index += 1) {
+      const recipient = toList[index];
+      const trackingToken = crypto.randomUUID();
+      const trackingUrls = buildTrackingUrls(trackingToken, reportUrl, { apiBaseUrl: apiOrigin });
+      const trackedText = injectTrackedLink(
+        parsed.data.message,
+        `Here is your updated accessibility report: ${trackingUrls.reportUrl}`
+      );
+      const trackedHtml = buildTrackedEmailHtml({
+        subject: parsed.data.subject,
+        message: parsed.data.message,
+        siteName: site.name || site.url,
+        siteUrl: site.url,
+        trackedReportUrl: trackingUrls.trackedReportUrl,
+        trackingPixelUrl: trackingUrls.trackingPixelUrl,
+        selfScanUrl: buildReportUrl(null, { dashboardBaseUrl: dashboardOrigin }),
+      });
+
+      const contactEntry = await createSiteContactHistoryEntry({
+        siteId: site.id,
+        recipientEmail: recipient,
+        subject: parsed.data.subject,
+        message: trackedText,
+        templateStyle: parsed.data.templateStyle || null,
+        deliveryChannel: 'api-followup',
+        deliveryStatus: 'sent',
+        sendBatchId,
+        scanId: latestScan?.id || null,
+        reportUrl: trackingUrls.reportUrl,
+        trackedReportUrl: trackingUrls.trackedReportUrl,
+        trackingPixelUrl: trackingUrls.trackingPixelUrl,
+        automationEnabled: false,
+        trackingToken,
+      });
+
+      let providerMessageId = null;
+      let deliveryChannel = 'supabase-function';
+
+      try {
+        const response = await invokeSupabaseFunction('send-admin-email', {
+          to: [recipient],
+          subject: parsed.data.subject,
+          text: trackedText,
+          html: trackedHtml,
+          siteId: site.id,
+          siteName: site.name,
+          siteUrl: site.url,
+        });
+        providerMessageId = response?.messageId || null;
+      } catch (edgeError) {
+        try {
+          deliveryChannel = 'api-fallback';
+          const fallbackResponse = await sendEmail({
+            to: [recipient],
+            subject: parsed.data.subject,
+            text: trackedText,
+            html: trackedHtml,
+          });
+          providerMessageId = fallbackResponse?.id || null;
+        } catch (fallbackError) {
+          const providerMessage = fallbackError?.message || edgeError?.message || 'Failed to send email';
+          await updateSiteContactHistoryEntry(contactEntry.id, {
+            delivery_status: 'failed',
+            delivery_channel: deliveryChannel,
+          });
+          failures.push({ recipient, message: providerMessage });
+          continue;
+        }
+      }
+
+      await updateSiteContactHistoryEntry(contactEntry.id, {
+        delivery_channel: deliveryChannel,
+        provider_message_id: providerMessageId,
+      });
+
+      await createSiteContactEvent({
+        siteId: site.id,
+        contactHistoryId: contactEntry.id,
+        eventType: 'sent',
+        metadata: { automated: false, followUp: true, sendBatchId, recipient },
+      });
+
+      sentResults.push({ recipient, contactHistoryId: contactEntry.id, deliveryChannel });
+    }
+
+    if (sentResults.length === 0) {
+      const providerMessage = failures[0]?.message || 'Failed to send email';
+      return res.status(400).json({
+        error: getEmailSendFailureMessage(providerMessage),
+        details: providerMessage,
+      });
+    }
+
+    await markSiteAsContacted(req.params.siteId);
+    adminReadCache.clear();
+
+    return res.json({
+      success: true,
+      message: failures.length > 0 ? 'Follow-up sent with some delivery failures' : 'Follow-up emails sent successfully',
+      sentCount: sentResults.length,
+      failedCount: failures.length,
+      failures,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ── Subscriptions ───────────────────────────────────────────────────
 router.get('/subscriptions', async (req, res, next) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
 
-    const result = await getAdminSubscriptions({ page, limit });
+    const cacheKey = `subscriptions:${page}:${limit}`;
+    const result = await getCachedAdminValue(cacheKey, () => getAdminSubscriptions({ page, limit }));
     return res.json(result);
   } catch (error) {
     next(error);

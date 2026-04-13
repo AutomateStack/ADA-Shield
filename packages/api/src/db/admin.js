@@ -1,5 +1,6 @@
 const { supabase } = require('./supabase');
 const { logger } = require('../utils/logger');
+const { calculateLeadScore, getLeadStatus } = require('../services/outreach-tracking');
 
 // ── Overview Stats ──────────────────────────────────────────────────
 
@@ -111,30 +112,16 @@ async function getAdminScans({ page = 1, limit = 20, type } = {}) {
  */
 async function getTopScannedUrls(limit = 10) {
   try {
-    // Fetch only recent URLs (last 10k) to avoid loading entire table into memory
-    const { data, error } = await supabase
-      .from('scan_results')
-      .select('url')
-      .order('scanned_at', { ascending: false })
-      .limit(10000);
-
+    const safeLimit = Math.min(50, Math.max(1, parseInt(limit, 10) || 10));
+    const { data, error } = await supabase.rpc('get_top_scanned_urls', {
+      limit_count: safeLimit,
+    });
     if (error) throw error;
 
-    // Aggregate by hostname in JS
-    const counts = {};
-    for (const row of (data || [])) {
-      try {
-        const hostname = new URL(row.url).hostname;
-        counts[hostname] = (counts[hostname] || 0) + 1;
-      } catch {
-        // Skip malformed URLs
-      }
-    }
-
-    return Object.entries(counts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, limit)
-      .map(([hostname, count]) => ({ hostname, scanCount: count }));
+    return (data || []).map((row) => ({
+      hostname: row.hostname,
+      scanCount: row.scan_count,
+    }));
   } catch (error) {
     logger.error('Failed to get top scanned URLs', { error: error.message });
     throw error;
@@ -281,27 +268,50 @@ async function getAdminScanDetail(scanId) {
  * @param {string} [params.type] - Filter by type: 'free' | 'admin' | 'registered'
  * @param {boolean} [params.contracted] - Filter by contracted (contacted_count > 0)
  * @param {string} [params.risk] - Filter by latest risk: 'high' | 'medium' | 'low' | 'unscanned'
+ * @param {string} [params.scannedFrom] - ISO timestamp lower bound for latest scan date
+ * @param {string} [params.scannedTo] - ISO timestamp upper bound for latest scan date
  */
-async function getAdminSites({ page = 1, limit = 20, sortBy = 'created_at', sortOrder = 'desc', type, contracted, risk } = {}) {
+async function getAdminSites({
+  page = 1,
+  limit = 20,
+  sortBy = 'created_at',
+  sortOrder = 'desc',
+  type,
+  contracted,
+  risk,
+  scannedFrom,
+  scannedTo,
+} = {}) {
   try {
     const allowedSortBy = new Set(['created_at', 'contacted_count', 'last_contacted_at']);
     const normalizedSortBy = allowedSortBy.has(sortBy) ? sortBy : 'created_at';
     const normalizedSortOrder = sortOrder === 'asc' ? 'asc' : 'desc';
 
     let filteredSiteIdsByRisk = null;
-    if (risk && ['high', 'medium', 'low', 'unscanned'].includes(risk)) {
-      const { data: allScans, error: allScansError } = await supabase
-        .from('scan_results')
-        .select('site_id, risk_score, scanned_at')
-        .order('scanned_at', { ascending: false });
+    let filteredSiteIdsByScanDate = null;
+    let latestBySiteMap = {};
+    const shouldFilterByScanDate = Boolean(scannedFrom || scannedTo);
+    const shouldFilterByRisk = Boolean(risk && ['high', 'medium', 'low', 'unscanned'].includes(risk));
 
-      if (allScansError) throw allScansError;
+    if (shouldFilterByRisk || shouldFilterByScanDate) {
+      const { data: latestBySite, error: latestBySiteError } = await supabase.rpc('get_latest_scan_per_site', {
+        site_ids: null,
+      });
+      if (latestBySiteError) throw latestBySiteError;
 
-      const latestRiskBySiteId = {};
-      for (const scan of allScans || []) {
-        if (scan.site_id && !Object.prototype.hasOwnProperty.call(latestRiskBySiteId, scan.site_id)) {
-          latestRiskBySiteId[scan.site_id] = scan.risk_score;
-        }
+      latestBySiteMap = (latestBySite || []).reduce((acc, row) => {
+        if (row?.site_id) acc[row.site_id] = row;
+        return acc;
+      }, {});
+
+      if (shouldFilterByScanDate) {
+        filteredSiteIdsByScanDate = Object.keys(latestBySiteMap).filter((siteId) => {
+          const scannedAt = latestBySiteMap[siteId]?.scanned_at;
+          if (!scannedAt) return false;
+          if (scannedFrom && scannedAt < scannedFrom) return false;
+          if (scannedTo && scannedAt > scannedTo) return false;
+          return true;
+        });
       }
 
       if (risk === 'unscanned') {
@@ -312,10 +322,10 @@ async function getAdminSites({ page = 1, limit = 20, sortBy = 'created_at', sort
 
         filteredSiteIdsByRisk = (allSitesOnly || [])
           .map((s) => s.id)
-          .filter((siteId) => !Object.prototype.hasOwnProperty.call(latestRiskBySiteId, siteId));
-      } else {
-        filteredSiteIdsByRisk = Object.keys(latestRiskBySiteId).filter((siteId) => {
-          const score = latestRiskBySiteId[siteId];
+          .filter((siteId) => !Object.prototype.hasOwnProperty.call(latestBySiteMap, siteId));
+      } else if (shouldFilterByRisk) {
+        filteredSiteIdsByRisk = Object.keys(latestBySiteMap).filter((siteId) => {
+          const score = latestBySiteMap[siteId]?.risk_score;
           if (!Number.isFinite(score)) return false;
           if (risk === 'high') return score >= 70;
           if (risk === 'medium') return score >= 40 && score < 70;
@@ -330,6 +340,18 @@ async function getAdminSites({ page = 1, limit = 20, sortBy = 'created_at', sort
         'id, user_id, url, name, created_at, owner_name, owner_email, notification_recipients, contacted_count, last_contacted_at, type',
         { count: 'exact' }
       );
+
+    if (filteredSiteIdsByScanDate) {
+      if (filteredSiteIdsByScanDate.length === 0) {
+        return {
+          sites: [],
+          total: 0,
+          page,
+          totalPages: 0,
+        };
+      }
+      query = query.in('id', filteredSiteIdsByScanDate);
+    }
 
     if (filteredSiteIdsByRisk) {
       if (filteredSiteIdsByRisk.length === 0) {
@@ -370,19 +392,17 @@ async function getAdminSites({ page = 1, limit = 20, sortBy = 'created_at', sort
     const latestScannedAtBySiteId = {};
 
     if (siteIds.length > 0) {
-      const { data: siteScans, error: scansError } = await supabase
-        .from('scan_results')
-        .select('site_id, risk_score, scanned_at')
-        .in('site_id', siteIds)
-        .order('scanned_at', { ascending: false });
+      const { data: latestForPage, error: latestForPageError } = await supabase.rpc('get_latest_scan_per_site', {
+        site_ids: siteIds,
+      });
 
-      if (scansError) {
-        logger.warn('Could not fetch latest scan risk for admin sites view', { error: scansError.message });
+      if (latestForPageError) {
+        logger.warn('Could not fetch latest scan risk for admin sites view', { error: latestForPageError.message });
       } else {
-        for (const scan of siteScans || []) {
-          if (!latestRiskBySiteId[scan.site_id]) {
-            latestRiskBySiteId[scan.site_id] = scan.risk_score;
-            latestScannedAtBySiteId[scan.site_id] = scan.scanned_at;
+        for (const row of latestForPage || []) {
+          if (row.site_id) {
+            latestRiskBySiteId[row.site_id] = row.risk_score;
+            latestScannedAtBySiteId[row.site_id] = row.scanned_at;
           }
         }
       }
@@ -474,7 +494,7 @@ async function getLatestSiteScanSummary(siteId) {
   try {
     const { data, error } = await supabase
       .from('scan_results')
-      .select('id, scanned_at, total_violations, critical_count, serious_count, risk_score, violations')
+      .select('id, public_token, scanned_at, total_violations, critical_count, serious_count, risk_score, violations')
       .eq('site_id', siteId)
       .order('scanned_at', { ascending: false })
       .limit(1)
@@ -533,6 +553,18 @@ async function createSiteContactHistoryEntry({
   deliveryChannel,
   deliveryStatus = 'sent',
   providerMessageId = null,
+  sendBatchId = null,
+  parentContactHistoryId = null,
+  scanId = null,
+  reportUrl = null,
+  trackedReportUrl = null,
+  trackingPixelUrl = null,
+  automationEnabled = true,
+  followUpStatus = 'none',
+  followUpRule = null,
+  followUpScheduledFor = null,
+  followUpAttempts = 0,
+  trackingToken = null,
 }) {
   try {
     const { data, error } = await supabase
@@ -546,6 +578,18 @@ async function createSiteContactHistoryEntry({
         delivery_channel: deliveryChannel || null,
         delivery_status: deliveryStatus,
         provider_message_id: providerMessageId,
+        send_batch_id: sendBatchId,
+        parent_contact_history_id: parentContactHistoryId,
+        scan_id: scanId,
+        report_url: reportUrl,
+        tracked_report_url: trackedReportUrl,
+        tracking_pixel_url: trackingPixelUrl,
+        automation_enabled: automationEnabled,
+        follow_up_status: followUpStatus,
+        follow_up_rule: followUpRule,
+        follow_up_scheduled_for: followUpScheduledFor,
+        follow_up_attempts: followUpAttempts,
+        tracking_token: trackingToken,
       })
       .select('*')
       .single();
@@ -560,6 +604,160 @@ async function createSiteContactHistoryEntry({
     });
     throw error;
   }
+}
+
+async function updateSiteContactHistoryEntry(contactHistoryId, patch) {
+  try {
+    const { data, error } = await supabase
+      .from('site_contact_history')
+      .update(patch)
+      .eq('id', contactHistoryId)
+      .select('*')
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    logger.error('Failed to update site contact history entry', {
+      contactHistoryId,
+      error: error.message,
+    });
+    throw error;
+  }
+}
+
+async function getSiteContactHistoryEntryById(contactHistoryId) {
+  try {
+    const { data, error } = await supabase
+      .from('site_contact_history')
+      .select('*')
+      .eq('id', contactHistoryId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw error;
+    return data || null;
+  } catch (error) {
+    logger.error('Failed to get site contact history entry by ID', {
+      contactHistoryId,
+      error: error.message,
+    });
+    throw error;
+  }
+}
+
+async function getSiteContactHistoryEntryByTrackingToken(trackingToken) {
+  try {
+    const { data, error } = await supabase
+      .from('site_contact_history')
+      .select('*')
+      .eq('tracking_token', trackingToken)
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw error;
+    return data || null;
+  } catch (error) {
+    logger.error('Failed to get site contact history entry by tracking token', {
+      trackingToken,
+      error: error.message,
+    });
+    throw error;
+  }
+}
+
+async function createSiteContactEvent({
+  siteId,
+  contactHistoryId,
+  eventType,
+  url = null,
+  metadata = {},
+  userAgent = null,
+  ipAddressHash = null,
+}) {
+  try {
+    const { data, error } = await supabase
+      .from('site_contact_events')
+      .insert({
+        site_id: siteId,
+        contact_history_id: contactHistoryId,
+        event_type: eventType,
+        url,
+        metadata: metadata || {},
+        user_agent: userAgent,
+        ip_address_hash: ipAddressHash,
+      })
+      .select('*')
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    logger.error('Failed to create site contact event', {
+      siteId,
+      contactHistoryId,
+      eventType,
+      error: error.message,
+    });
+    throw error;
+  }
+}
+
+async function recordSiteContactEngagement({
+  trackingToken,
+  eventType,
+  url = null,
+  metadata = {},
+  userAgent = null,
+  ipAddressHash = null,
+}) {
+  const contact = await getSiteContactHistoryEntryByTrackingToken(trackingToken);
+  if (!contact) return null;
+
+  const now = new Date().toISOString();
+  const nextContact = {
+    ...contact,
+    last_engagement_at: now,
+    last_event_type: eventType,
+  };
+
+  if (eventType === 'open') {
+    nextContact.opens_count = Number(contact.opens_count || 0) + 1;
+    nextContact.first_opened_at = contact.first_opened_at || now;
+    nextContact.last_opened_at = now;
+  }
+
+  if (eventType === 'click') {
+    nextContact.clicks_count = Number(contact.clicks_count || 0) + 1;
+    nextContact.first_clicked_at = contact.first_clicked_at || now;
+    nextContact.last_clicked_at = now;
+    nextContact.last_clicked_url = url || contact.last_clicked_url || null;
+  }
+
+  nextContact.lead_score = calculateLeadScore(nextContact);
+  nextContact.lead_status = getLeadStatus(nextContact.lead_score);
+
+  await createSiteContactEvent({
+    siteId: contact.site_id,
+    contactHistoryId: contact.id,
+    eventType,
+    url,
+    metadata,
+    userAgent,
+    ipAddressHash,
+  });
+
+  return updateSiteContactHistoryEntry(contact.id, {
+    opens_count: nextContact.opens_count,
+    clicks_count: nextContact.clicks_count,
+    first_opened_at: nextContact.first_opened_at,
+    last_opened_at: nextContact.last_opened_at,
+    first_clicked_at: nextContact.first_clicked_at,
+    last_clicked_at: nextContact.last_clicked_at,
+    last_clicked_url: nextContact.last_clicked_url,
+    last_engagement_at: nextContact.last_engagement_at,
+    last_event_type: nextContact.last_event_type,
+    lead_score: nextContact.lead_score,
+    lead_status: nextContact.lead_status,
+  });
 }
 
 /**
@@ -589,6 +787,425 @@ async function getSiteContactHistory(siteId, { page = 1, limit = 20 } = {}) {
   }
 }
 
+async function getSiteContactEvents(siteId, { limit = 50 } = {}) {
+  try {
+    const { data, error } = await supabase
+      .from('site_contact_events')
+      .select('*')
+      .eq('site_id', siteId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    logger.error('Failed to get site contact events', { siteId, error: error.message });
+    throw error;
+  }
+}
+
+function summarizeContactEntries(entries) {
+  const sentCount = entries.filter((entry) => entry.delivery_status === 'sent').length;
+  const openedCount = entries.filter((entry) => Number(entry.opens_count || 0) > 0).length;
+  const clickedCount = entries.filter((entry) => Number(entry.clicks_count || 0) > 0).length;
+  const hotLeadCount = entries.filter((entry) => entry.lead_status === 'hot').length;
+  const followUpsScheduled = entries.filter((entry) => entry.follow_up_status === 'scheduled').length;
+
+  return {
+    sentCount,
+    openedCount,
+    clickedCount,
+    openRate: sentCount > 0 ? Math.round((openedCount / sentCount) * 100) : 0,
+    clickRate: sentCount > 0 ? Math.round((clickedCount / sentCount) * 100) : 0,
+    hotLeadCount,
+    followUpsScheduled,
+  };
+}
+
+async function getSiteOutreachAnalytics(siteId) {
+  try {
+    const [site, history, events] = await Promise.all([
+      getSiteById(siteId),
+      supabase
+        .from('site_contact_history')
+        .select('*')
+        .eq('site_id', siteId)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('site_contact_events')
+        .select('*')
+        .eq('site_id', siteId)
+        .order('created_at', { ascending: false })
+        .limit(100),
+    ]);
+
+    if (history.error) throw history.error;
+    if (events.error) throw events.error;
+
+    const entries = history.data || [];
+    const summary = summarizeContactEntries(entries);
+    const topLead = [...entries].sort((a, b) => (b.lead_score || 0) - (a.lead_score || 0))[0] || null;
+
+    return {
+      site,
+      summary: {
+        ...summary,
+        topLeadScore: topLead?.lead_score || 0,
+        topLeadStatus: topLead?.lead_status || 'cold',
+        lastEngagementAt: topLead?.last_engagement_at || null,
+      },
+      entries,
+      events: events.data || [],
+    };
+  } catch (error) {
+    logger.error('Failed to get site outreach analytics', { siteId, error: error.message });
+    throw error;
+  }
+}
+
+async function getOutreachOverview({ limit = 10 } = {}) {
+  try {
+    const [historyResult, eventsResult] = await Promise.all([
+      supabase
+        .from('site_contact_history')
+        .select('id, site_id, recipient_email, subject, delivery_status, created_at, opens_count, clicks_count, lead_score, lead_status, follow_up_status, follow_up_scheduled_for, last_engagement_at, sites(name, url)')
+        .order('created_at', { ascending: false })
+        .limit(250),
+      supabase
+        .from('site_contact_events')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(30),
+    ]);
+
+    if (historyResult.error) throw historyResult.error;
+    if (eventsResult.error) throw eventsResult.error;
+
+    const entries = historyResult.data || [];
+    const summary = summarizeContactEntries(entries);
+    const topLeads = [...entries]
+      .sort((a, b) => (b.lead_score || 0) - (a.lead_score || 0))
+      .slice(0, limit)
+      .map((entry) => ({
+        id: entry.id,
+        siteId: entry.site_id,
+        recipientEmail: entry.recipient_email,
+        subject: entry.subject,
+        leadScore: entry.lead_score,
+        leadStatus: entry.lead_status,
+        opensCount: entry.opens_count,
+        clicksCount: entry.clicks_count,
+        lastEngagementAt: entry.last_engagement_at,
+        followUpStatus: entry.follow_up_status,
+        followUpScheduledFor: entry.follow_up_scheduled_for,
+        siteName: entry.sites?.name || null,
+        siteUrl: entry.sites?.url || null,
+      }));
+
+    return {
+      summary,
+      topLeads,
+      recentEvents: eventsResult.data || [],
+    };
+  } catch (error) {
+    logger.error('Failed to get outreach overview', { error: error.message });
+    throw error;
+  }
+}
+
+/**
+ * Returns click-level analytics for all outreach emails:
+ * - Funnel: sent → opened → clicked
+ * - Per-site breakdown: emails sent, opens, clicks, click rate, last click
+ * - Recent click events ordered by time
+ */
+async function getOutreachClickAnalytics({ limit = 50 } = {}) {
+  try {
+    const [historyResult, clickEventsResult] = await Promise.all([
+      supabase
+        .from('site_contact_history')
+        .select('id, site_id, recipient_email, subject, delivery_status, created_at, opens_count, clicks_count, lead_score, lead_status, last_clicked_at, last_clicked_url, first_clicked_at, sites(id, name, url)')
+        .order('created_at', { ascending: false })
+        .limit(500),
+      supabase
+        .from('site_contact_events')
+        .select('id, site_id, contact_history_id, event_type, url, created_at, metadata')
+        .eq('event_type', 'click')
+        .order('created_at', { ascending: false })
+        .limit(limit),
+    ]);
+
+    if (historyResult.error) throw historyResult.error;
+    if (clickEventsResult.error) throw clickEventsResult.error;
+
+    const entries = historyResult.data || [];
+    const clickEvents = clickEventsResult.data || [];
+
+    // Funnel totals
+    const sentCount = entries.filter((e) => e.delivery_status === 'sent').length;
+    const openedCount = entries.filter((e) => Number(e.opens_count || 0) > 0).length;
+    const clickedCount = entries.filter((e) => Number(e.clicks_count || 0) > 0).length;
+    const totalClicks = entries.reduce((sum, e) => sum + Number(e.clicks_count || 0), 0);
+
+    // Per-site aggregation
+    const siteMap = {};
+    for (const entry of entries) {
+      if (!entry.site_id) continue;
+      if (!siteMap[entry.site_id]) {
+        siteMap[entry.site_id] = {
+          siteId: entry.site_id,
+          siteName: entry.sites?.name || null,
+          siteUrl: entry.sites?.url || null,
+          emailsSent: 0,
+          opened: 0,
+          clicked: 0,
+          totalClicks: 0,
+          lastClickAt: null,
+          recipients: new Set(),
+        };
+      }
+      const s = siteMap[entry.site_id];
+      if (entry.delivery_status === 'sent') s.emailsSent += 1;
+      if (Number(entry.opens_count || 0) > 0) s.opened += 1;
+      if (Number(entry.clicks_count || 0) > 0) {
+        s.clicked += 1;
+        s.totalClicks += Number(entry.clicks_count);
+      }
+      if (entry.last_clicked_at) {
+        if (!s.lastClickAt || entry.last_clicked_at > s.lastClickAt) {
+          s.lastClickAt = entry.last_clicked_at;
+        }
+      }
+      if (entry.recipient_email) s.recipients.add(entry.recipient_email);
+    }
+
+    const sitesWithClicks = Object.values(siteMap)
+      .filter((s) => s.clicked > 0)
+      .sort((a, b) => b.totalClicks - a.totalClicks)
+      .map((s) => ({
+        siteId: s.siteId,
+        siteName: s.siteName,
+        siteUrl: s.siteUrl,
+        emailsSent: s.emailsSent,
+        opened: s.opened,
+        clicked: s.clicked,
+        totalClicks: s.totalClicks,
+        clickRate: s.emailsSent > 0 ? Math.round((s.clicked / s.emailsSent) * 100) : 0,
+        lastClickAt: s.lastClickAt,
+        uniqueRecipients: s.recipients.size,
+      }));
+
+    return {
+      funnel: {
+        sent: sentCount,
+        opened: openedCount,
+        clicked: clickedCount,
+        totalClicks,
+        openRate: sentCount > 0 ? Math.round((openedCount / sentCount) * 100) : 0,
+        clickRate: sentCount > 0 ? Math.round((clickedCount / sentCount) * 100) : 0,
+        clickToOpenRate: openedCount > 0 ? Math.round((clickedCount / openedCount) * 100) : 0,
+      },
+      sitesWithClicks,
+      recentClicks: clickEvents,
+    };
+  } catch (error) {
+    logger.error('Failed to get outreach click analytics', { error: error.message });
+    throw error;
+  }
+}
+
+/**
+ * Returns sites eligible for a 10-day follow-up campaign:
+ * - Must have been contacted at least once (last_contacted_at is set)
+ * - Last contact was >= minDays ago (default 10)
+ * - Joined with latest outreach entry per site for engagement context
+ */
+async function getScheduledFollowUps({ limit = 100 } = {}) {
+  try {
+    const { data, error } = await supabase
+      .from('site_contact_history')
+      .select('id, site_id, recipient_email, subject, follow_up_status, follow_up_scheduled_for, follow_up_rule, lead_score, lead_status, opens_count, clicks_count, last_engagement_at, created_at, sites(id, name, url, owner_email)')
+      .eq('follow_up_status', 'scheduled')
+      .not('follow_up_scheduled_for', 'is', null)
+      .order('follow_up_scheduled_for', { ascending: true })
+      .limit(limit);
+
+    if (error) throw error;
+
+    const now = new Date();
+    const items = (data || []).map((entry) => {
+      const scheduledAt = new Date(entry.follow_up_scheduled_for);
+      const overdue = scheduledAt < now;
+      const minsUntil = Math.round((scheduledAt.getTime() - now.getTime()) / 60000);
+      return {
+        id: entry.id,
+        siteId: entry.site_id,
+        siteName: entry.sites?.name || null,
+        siteUrl: entry.sites?.url || null,
+        ownerEmail: entry.sites?.owner_email || entry.recipient_email || null,
+        recipientEmail: entry.recipient_email,
+        subject: entry.subject,
+        leadScore: entry.lead_score || 0,
+        leadStatus: entry.lead_status || 'cold',
+        opensCount: entry.opens_count || 0,
+        clicksCount: entry.clicks_count || 0,
+        followUpRule: entry.follow_up_rule || null,
+        followUpScheduledFor: entry.follow_up_scheduled_for,
+        lastEngagementAt: entry.last_engagement_at || null,
+        sentAt: entry.created_at,
+        overdue,
+        minsUntil,
+      };
+    });
+
+    return { items, total: items.length, overdueCount: items.filter((i) => i.overdue).length };
+  } catch (error) {
+    logger.error('Failed to get scheduled follow-ups', { error: error.message });
+    throw error;
+  }
+}
+
+/**
+ * Returns all outreach entries that have had follow-up actions (any status ≠ 'none'),
+ * with a summary count breakdown by status.
+ */
+async function getFollowUpHistory({ limit = 200, status } = {}) {
+  try {
+    let query = supabase
+      .from('site_contact_history')
+      .select('id, site_id, recipient_email, subject, follow_up_status, follow_up_rule, follow_up_scheduled_for, follow_up_sent_at, follow_up_attempts, opens_count, clicks_count, lead_score, lead_status, last_engagement_at, created_at, sites(id, name, url, owner_email)')
+      .neq('follow_up_status', 'none')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (status) {
+      query = query.eq('follow_up_status', status);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const items = (data || []).map((entry) => ({
+      id: entry.id,
+      siteId: entry.site_id,
+      siteName: entry.sites?.name || null,
+      siteUrl: entry.sites?.url || null,
+      ownerEmail: entry.sites?.owner_email || entry.recipient_email || null,
+      recipientEmail: entry.recipient_email,
+      subject: entry.subject,
+      followUpStatus: entry.follow_up_status,
+      followUpRule: entry.follow_up_rule || null,
+      followUpScheduledFor: entry.follow_up_scheduled_for || null,
+      followUpSentAt: entry.follow_up_sent_at || null,
+      followUpAttempts: entry.follow_up_attempts || 0,
+      opensCount: entry.opens_count || 0,
+      clicksCount: entry.clicks_count || 0,
+      leadScore: entry.lead_score || 0,
+      leadStatus: entry.lead_status || 'cold',
+      lastEngagementAt: entry.last_engagement_at || null,
+      sentAt: entry.created_at,
+    }));
+
+    const summary = {
+      total: items.length,
+      sent: items.filter((i) => i.followUpStatus === 'sent').length,
+      scheduled: items.filter((i) => i.followUpStatus === 'scheduled').length,
+      skipped: items.filter((i) => i.followUpStatus === 'skipped').length,
+      canceled: items.filter((i) => i.followUpStatus === 'canceled').length,
+    };
+
+    return { items, summary };
+  } catch (error) {
+    logger.error('Failed to get follow-up history', { error: error.message });
+    throw error;
+  }
+}
+
+async function getFollowUpDueSites({ minDays = 10, limit = 100 } = {}) {
+  try {
+    const cutoff = new Date(Date.now() - minDays * 24 * 60 * 60 * 1000).toISOString();
+
+    const { data: sites, error: sitesError } = await supabase
+      .from('sites')
+      .select('id, url, name, owner_name, owner_email, notification_recipients, contacted_count, last_contacted_at, type')
+      .not('last_contacted_at', 'is', null)
+      .lte('last_contacted_at', cutoff)
+      .order('last_contacted_at', { ascending: true })
+      .limit(limit);
+
+    if (sitesError) throw sitesError;
+
+    if (!sites || sites.length === 0) {
+      return { sites: [], total: 0 };
+    }
+
+    const siteIds = sites.map((s) => s.id);
+
+    // Get best outreach entry per site (highest engagement) for context
+    const { data: historyData, error: historyError } = await supabase
+      .from('site_contact_history')
+      .select('site_id, opens_count, clicks_count, lead_score, lead_status, delivery_status, last_engagement_at, created_at')
+      .in('site_id', siteIds)
+      .eq('delivery_status', 'sent')
+      .order('created_at', { ascending: false });
+
+    if (historyError) throw historyError;
+
+    // Map best (highest engagement) entry per site
+    const bestBySite = {};
+    for (const entry of historyData || []) {
+      const existing = bestBySite[entry.site_id];
+      if (!existing || (entry.lead_score || 0) > (existing.lead_score || 0)) {
+        bestBySite[entry.site_id] = entry;
+      }
+    }
+
+    // Total email counts per site
+    const countBySite = {};
+    for (const entry of historyData || []) {
+      countBySite[entry.site_id] = (countBySite[entry.site_id] || 0) + 1;
+    }
+
+    const daysSince = (dateStr) => {
+      if (!dateStr) return null;
+      return Math.floor((Date.now() - new Date(dateStr).getTime()) / (1000 * 60 * 60 * 24));
+    };
+
+    const result = sites.map((site) => {
+      const best = bestBySite[site.site_id] || bestBySite[site.id] || null;
+      const hasEmail = Boolean(
+        site.owner_email ||
+        (Array.isArray(site.notification_recipients) && site.notification_recipients.length > 0)
+      );
+      return {
+        siteId: site.id,
+        siteName: site.name,
+        siteUrl: site.url,
+        ownerEmail: site.owner_email || null,
+        recipients: site.notification_recipients || [],
+        hasEmail,
+        contactedCount: site.contacted_count || 0,
+        lastContactedAt: site.last_contacted_at,
+        daysSinceLastContact: daysSince(site.last_contacted_at),
+        totalEmailsSent: countBySite[site.id] || 0,
+        bestLeadScore: best?.lead_score || 0,
+        bestLeadStatus: best?.lead_status || 'cold',
+        totalOpens: best?.opens_count || 0,
+        totalClicks: best?.clicks_count || 0,
+        lastEngagementAt: best?.last_engagement_at || null,
+      };
+    });
+
+    return {
+      sites: result,
+      total: result.length,
+    };
+  } catch (error) {
+    logger.error('Failed to get follow-up due sites', { error: error.message });
+    throw error;
+  }
+}
+
 module.exports = {
   getAdminStats,
   getAdminScans,
@@ -602,5 +1219,17 @@ module.exports = {
   getLatestSiteScanSummary,
   markSiteAsContacted,
   createSiteContactHistoryEntry,
+  updateSiteContactHistoryEntry,
+  getSiteContactHistoryEntryById,
+  getSiteContactHistoryEntryByTrackingToken,
+  createSiteContactEvent,
+  recordSiteContactEngagement,
   getSiteContactHistory,
+  getSiteContactEvents,
+  getSiteOutreachAnalytics,
+  getOutreachOverview,
+  getOutreachClickAnalytics,
+  getScheduledFollowUps,
+  getFollowUpHistory,
+  getFollowUpDueSites,
 };

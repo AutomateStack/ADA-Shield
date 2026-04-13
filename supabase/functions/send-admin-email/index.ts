@@ -11,6 +11,8 @@ type SendAdminEmailPayload = {
   cc?: string[];
   subject?: string;
   message?: string;
+  text?: string;
+  html?: string;
   siteId?: string;
   siteName?: string | null;
   siteUrl?: string | null;
@@ -111,7 +113,9 @@ Deno.serve(async (req) => {
 
   const toList = normalizeEmailList(payload.to);
   const subject = sanitizeSubject(payload.subject);
-  const message = String(payload.message || '').trim();
+  const message = String(payload.message || payload.text || '').trim();
+  const text = String(payload.text || payload.message || '').trim();
+  const suppliedHtml = typeof payload.html === 'string' ? payload.html.trim() : '';
   const siteName = escapeHtml(payload.siteName || 'your website');
   const siteUrl = escapeHtml(payload.siteUrl || '');
 
@@ -126,8 +130,8 @@ Deno.serve(async (req) => {
       from,
       to: toList,
       subject,
-      text: message,
-      html: `
+      text,
+      html: suppliedHtml || `
 <!DOCTYPE html>
 <html lang="en">
 <head>

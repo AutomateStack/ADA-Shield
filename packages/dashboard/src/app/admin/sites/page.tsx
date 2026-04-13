@@ -66,10 +66,19 @@ interface ContactHistoryEntry {
   recipient_email: string;
   subject: string;
   message: string;
+  tracking_token: string | null;
   template_style: EmailTemplateStyle | null;
   delivery_channel: 'supabase-function' | 'api-fallback' | null;
   delivery_status: 'sent' | 'failed' | null;
   provider_message_id: string | null;
+  opens_count: number;
+  clicks_count: number;
+  lead_score: number;
+  lead_status: 'cold' | 'warm' | 'hot';
+  follow_up_status: 'none' | 'scheduled' | 'sent' | 'skipped' | 'canceled';
+  follow_up_rule: string | null;
+  follow_up_scheduled_for: string | null;
+  last_engagement_at: string | null;
   created_at: string;
 }
 
@@ -97,6 +106,13 @@ interface EmailTemplateResponse {
   message: string;
 }
 
+function getIsoDateDaysAgo(days: number): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
 export default function AdminSitesPage() {
   const [data, setData] = useState<SitesResponse | null>(null);
   const [page, setPage] = useState(1);
@@ -115,6 +131,7 @@ export default function AdminSitesPage() {
   const [filterType, setFilterType] = useState<'all' | 'free' | 'admin' | 'registered'>('all');
   const [filterContracted, setFilterContracted] = useState<'all' | 'yes' | 'no'>('all');
   const [filterRisk, setFilterRisk] = useState<'all' | 'high' | 'medium' | 'low' | 'unscanned'>('all');
+  const [filterScannedWindow, setFilterScannedWindow] = useState<'all' | '1' | '7' | '30' | '90'>('all');
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
   const adminSecret = process.env.NEXT_PUBLIC_ADMIN_SECRET || '';
@@ -141,6 +158,9 @@ export default function AdminSitesPage() {
       if (filterRisk !== 'all') {
         params.set('risk', filterRisk);
       }
+      if (filterScannedWindow !== 'all') {
+        params.set('scannedFrom', getIsoDateDaysAgo(parseInt(filterScannedWindow, 10)));
+      }
 
       const res = await fetch(
         `${apiUrl}/api/admin/sites?${params.toString()}`,
@@ -164,7 +184,17 @@ export default function AdminSitesPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiUrl, adminSecret, page, sortBy, sortOrder, filterType, filterContracted, filterRisk]);
+  }, [
+    apiUrl,
+    adminSecret,
+    page,
+    sortBy,
+    sortOrder,
+    filterType,
+    filterContracted,
+    filterRisk,
+    filterScannedWindow,
+  ]);
 
   useEffect(() => {
     fetchSites();
@@ -318,12 +348,12 @@ export default function AdminSitesPage() {
     setHistoryData(null);
 
     try {
-      const res = await fetch(`${apiUrl}/api/admin/sites/${site.id}/contact-history?page=1&limit=20`, {
+      const historyRes = await fetch(`${apiUrl}/api/admin/sites/${site.id}/contact-history?page=1&limit=20`, {
         headers: { 'x-admin-secret': adminSecret },
       });
-      if (!res.ok) throw new Error('Failed to load contact history');
-      const payload: ContactHistoryResponse = await res.json();
-      setHistoryData(payload);
+      if (!historyRes.ok) throw new Error('Failed to load contact history');
+      const historyPayload: ContactHistoryResponse = await historyRes.json();
+      setHistoryData(historyPayload);
     } catch (err: any) {
       alert(err.message || 'Failed to load contact history');
       setHistoryModalOpen(false);
@@ -345,6 +375,11 @@ export default function AdminSitesPage() {
   const handleFilterRiskChange = (newRisk: 'all' | 'high' | 'medium' | 'low' | 'unscanned') => {
     setFilterRisk(newRisk);
     setPage(1); // Reset to first page when filter changes
+  };
+
+  const handleFilterScannedWindowChange = (value: 'all' | '1' | '7' | '30' | '90') => {
+    setFilterScannedWindow(value);
+    setPage(1);
   };
 
   const onTemplateStyleChange = (style: EmailTemplateStyle) => {
@@ -429,12 +464,28 @@ export default function AdminSitesPage() {
           </select>
         </div>
 
-        {(filterType !== 'all' || filterContracted !== 'all' || filterRisk !== 'all') && (
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-medium text-slate-300">Scanned In:</label>
+          <select
+            value={filterScannedWindow}
+            onChange={(e) => handleFilterScannedWindowChange(e.target.value as 'all' | '1' | '7' | '30' | '90')}
+            className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white hover:bg-white/10 focus:bg-white/10 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          >
+            <option value="all">Any time</option>
+            <option value="1">Today</option>
+            <option value="7">Last 7 days</option>
+            <option value="30">Last 30 days</option>
+            <option value="90">Last 90 days</option>
+          </select>
+        </div>
+
+        {(filterType !== 'all' || filterContracted !== 'all' || filterRisk !== 'all' || filterScannedWindow !== 'all') && (
           <button
             onClick={() => {
               setFilterType('all');
               setFilterContracted('all');
               setFilterRisk('all');
+              setFilterScannedWindow('all');
               setPage(1);
             }}
             className="px-3 py-2 text-sm text-slate-300 hover:text-white bg-white/5 border border-white/10 rounded-lg transition-colors"
@@ -630,7 +681,6 @@ export default function AdminSitesPage() {
                 <h2 className="text-lg font-bold text-white">Send Email to {emailModal.siteName}</h2>
                 <div className="mt-2 space-y-1">
                   <p className="text-xs text-slate-400"><strong>To:</strong> <span className="break-all">{emailModal.recipientSummary}</span></p>
-                  <p className="text-xs text-slate-500"><strong>CC:</strong> tthirmal@gmail.com (monitoring)</p>
                 </div>
               </div>
               <button

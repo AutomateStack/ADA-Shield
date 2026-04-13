@@ -1,8 +1,9 @@
-'use client';
+﻿'use client';
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, Globe, Settings, LogOut, CreditCard } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { LayoutDashboard, Globe, Settings, LogOut, CreditCard, User } from 'lucide-react';
 import { ShieldLogo } from '@/components/ui/shield-logo';
 import { createSupabaseBrowser } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
@@ -21,6 +22,14 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    const supabase = createSupabaseBrowser();
+    supabase.auth.getUser().then(({ data }) => {
+      setUserEmail(data.user?.email ?? null);
+    });
+  }, []);
 
   const handleSignOut = async () => {
     const supabase = createSupabaseBrowser();
@@ -44,7 +53,10 @@ export default function DashboardLayout({
         {/* Nav */}
         <nav className="flex-1 px-4 py-4 space-y-1">
           {navItems.map((item) => {
-            const isActive = pathname === item.href;
+            const isActive =
+              item.href === '/dashboard'
+                ? pathname === '/dashboard'
+                : pathname.startsWith(item.href);
             return (
               <Link
                 key={item.href}
@@ -63,8 +75,16 @@ export default function DashboardLayout({
           })}
         </nav>
 
-        {/* Sign Out */}
-        <div className="px-4 py-4 border-t border-white/10">
+        {/* User info + Sign Out */}
+        <div className="px-4 py-4 border-t border-white/10 space-y-1">
+          {userEmail && (
+            <div className="flex items-center gap-3 px-3 py-2 mb-1">
+              <div className="h-7 w-7 rounded-full bg-brand-600/30 flex items-center justify-center flex-shrink-0">
+                <User className="h-3.5 w-3.5 text-brand-300" />
+              </div>
+              <span className="text-xs text-slate-500 truncate">{userEmail}</span>
+            </div>
+          )}
           <button
             onClick={handleSignOut}
             className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-400 hover:bg-white/5 hover:text-white transition-colors w-full"
@@ -76,7 +96,7 @@ export default function DashboardLayout({
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0">
         {/* Mobile Header */}
         <header className="md:hidden border-b border-white/10 bg-slate-900/80 backdrop-blur px-4 py-3 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2.5">
@@ -85,8 +105,9 @@ export default function DashboardLayout({
           </Link>
           <button
             onClick={handleSignOut}
-            className="text-slate-400 hover:text-white text-sm"
+            className="flex items-center gap-1.5 text-slate-400 hover:text-white text-sm transition-colors"
           >
+            <LogOut className="h-4 w-4" />
             Sign Out
           </button>
         </header>
@@ -94,13 +115,16 @@ export default function DashboardLayout({
         {/* Mobile Nav */}
         <nav className="md:hidden flex border-b border-white/10 bg-slate-950 px-2">
           {navItems.map((item) => {
-            const isActive = pathname === item.href;
+            const isActive =
+              item.href === '/dashboard'
+                ? pathname === '/dashboard'
+                : pathname.startsWith(item.href);
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  'flex-1 flex items-center justify-center gap-2 py-3 text-xs font-medium border-b-2 transition-colors',
+                  'flex-1 flex flex-col items-center justify-center gap-1 py-3 text-[11px] font-medium border-b-2 transition-colors',
                   isActive
                     ? 'border-brand-500 text-brand-300'
                     : 'border-transparent text-slate-400 hover:text-white'
@@ -114,8 +138,8 @@ export default function DashboardLayout({
         </nav>
 
         {/* Page Content */}
-        <main className="flex-1 p-6 md:p-8 overflow-auto">
-          <div className="max-w-6xl mx-auto">{children}</div>
+        <main className="flex-1 p-5 md:p-8 overflow-auto">
+          <div className="max-w-5xl mx-auto">{children}</div>
         </main>
       </div>
     </div>

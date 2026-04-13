@@ -10,6 +10,7 @@ const { generateFix } = require('./fix-suggester');
 // Reuses browser instances to avoid ~8s launch overhead per scan.
 // Automatically recycles after MAX_PAGES_PER_BROWSER to prevent memory leaks.
 const MAX_PAGES_PER_BROWSER = 20;
+const BROWSER_POOL_ENABLED = process.env.SCANNER_BROWSER_POOL !== 'false';
 let _browserInstance = null;
 let _browserPageCount = 0;
 let _browserLock = Promise.resolve();
@@ -19,6 +20,10 @@ let _browserLock = Promise.resolve();
  * Thread-safe via promise chain lock.
  */
 async function getBrowser() {
+  if (!BROWSER_POOL_ENABLED) {
+    throw new Error('Browser pool disabled by SCANNER_BROWSER_POOL=false');
+  }
+
   _browserLock = _browserLock.then(async () => {
     if (_browserInstance && _browserInstance.isConnected() && _browserPageCount < MAX_PAGES_PER_BROWSER) {
       _browserPageCount++;
@@ -111,6 +116,64 @@ const DEFAULT_NAV_OPTIONS = {
   waitUntil: 'networkidle2',
   timeout: 30000,
 };
+
+/**
+ * Detects whether an error is a Puppeteer navigation timeout.
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isNavigationTimeoutError(error) {
+  const message = error?.message || '';
+  return (
+    typeof message === 'string' &&
+    message.toLowerCase().includes('navigation timeout')
+  );
+}
+
+/**
+ * Navigates with retries and fallback wait strategies for slow websites.
+ * @param {import('puppeteer').Page} page
+ * @param {string} url
+ * @param {number} timeoutMs
+ * @returns {Promise<{waitUntil: "load"|"domcontentloaded", timeout: number}>}
+ */
+async function navigateWithRetry(page, url, timeoutMs) {
+  const attempts = [
+    { waitUntil: 'load', timeout: timeoutMs },
+    { waitUntil: 'load', timeout: Math.max(timeoutMs + 15000, 45000) },
+    { waitUntil: 'domcontentloaded', timeout: Math.max(timeoutMs + 15000, 45000) },
+  ];
+
+  let lastError;
+
+  for (let i = 0; i < attempts.length; i++) {
+    const attempt = attempts[i];
+    try {
+      await page.goto(url, attempt);
+      return attempt;
+    } catch (error) {
+      lastError = error;
+      const isTimeout = isNavigationTimeoutError(error);
+      const isLastAttempt = i === attempts.length - 1;
+
+      logger.warn('Navigation attempt failed', {
+        url,
+        attempt: i + 1,
+        waitUntil: attempt.waitUntil,
+        timeout: attempt.timeout,
+        isTimeout,
+        error: error.message,
+      });
+
+      // Only retry navigation timeouts; bubble up other failures immediately.
+      if (!isTimeout || isLastAttempt) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
 
 /**
  * Extracts site contact metadata from page HTML.
@@ -208,12 +271,12 @@ async function extractPageMetadata(page) {
 async function scanPage(url, options = {}) {
   const startTime = Date.now();
   let page = null;
+  let browser = null;
   let usedPool = false;
 
   try {
     logger.info('Starting scan', { url });
 
-    let browser;
     try {
       // Try pooled browser first (faster)
       browser = await getBrowser();
@@ -244,15 +307,18 @@ async function scanPage(url, options = {}) {
     // Allow axe-core injection even on pages with strict CSP
     await page.setBypassCSP(true);
 
-    // Navigate to the page — use 'load' instead of 'networkidle2'
-    // to avoid hanging on sites with persistent connections
-    await page.goto(url, {
-      waitUntil: 'load',
-      timeout: options.timeout || DEFAULT_NAV_OPTIONS.timeout,
-    });
+    // Navigate with fallback strategies to reduce flaky timeout failures.
+    const navTimeout = options.timeout || DEFAULT_NAV_OPTIONS.timeout;
+    const navAttempt = await navigateWithRetry(page, url, navTimeout);
 
     // Additional wait for dynamic content to settle
     await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    logger.info('Navigation complete', {
+      url,
+      waitUntil: navAttempt.waitUntil,
+      timeout: navAttempt.timeout,
+    });
 
     // Remove all iframes from the DOM to prevent axe frame analysis errors
     await page.evaluate(() => {
@@ -311,9 +377,12 @@ async function scanPage(url, options = {}) {
     logger.error('Scan failed', { url, error: error.message });
     throw new Error(`Scan failed for ${url}: ${error.message}`);
   } finally {
-    // Close the page, not the browser (pool manages browser lifecycle)
+    // Always close page. Close browser too when standalone mode is used.
     if (page) {
       try { await page.close(); } catch { /* ignore */ }
+    }
+    if (browser && !usedPool) {
+      try { await browser.close(); } catch { /* ignore */ }
     }
   }
 }

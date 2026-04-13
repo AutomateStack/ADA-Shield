@@ -62,13 +62,49 @@ CREATE TABLE IF NOT EXISTS scan_results (
 CREATE TABLE IF NOT EXISTS site_contact_history (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   site_id UUID REFERENCES sites(id) ON DELETE CASCADE NOT NULL,
+  send_batch_id UUID,
+  parent_contact_history_id UUID REFERENCES site_contact_history(id) ON DELETE SET NULL,
+  scan_id UUID REFERENCES scan_results(id) ON DELETE SET NULL,
   recipient_email TEXT NOT NULL,
   subject TEXT NOT NULL,
   message TEXT NOT NULL,
+  tracking_token UUID DEFAULT gen_random_uuid(),
+  report_url TEXT,
+  tracked_report_url TEXT,
+  tracking_pixel_url TEXT,
   template_style TEXT,
   delivery_channel TEXT CHECK (delivery_channel IN ('supabase-function', 'api-fallback')),
   delivery_status TEXT CHECK (delivery_status IN ('sent', 'failed')) DEFAULT 'sent',
   provider_message_id TEXT,
+  opens_count INTEGER NOT NULL DEFAULT 0,
+  clicks_count INTEGER NOT NULL DEFAULT 0,
+  first_opened_at TIMESTAMPTZ,
+  last_opened_at TIMESTAMPTZ,
+  first_clicked_at TIMESTAMPTZ,
+  last_clicked_at TIMESTAMPTZ,
+  last_clicked_url TEXT,
+  last_engagement_at TIMESTAMPTZ,
+  last_event_type TEXT,
+  lead_score INTEGER NOT NULL DEFAULT 0,
+  lead_status TEXT NOT NULL DEFAULT 'cold' CHECK (lead_status IN ('cold', 'warm', 'hot')),
+  follow_up_status TEXT NOT NULL DEFAULT 'none' CHECK (follow_up_status IN ('none', 'scheduled', 'sent', 'skipped', 'canceled')),
+  follow_up_rule TEXT,
+  follow_up_scheduled_for TIMESTAMPTZ,
+  follow_up_sent_at TIMESTAMPTZ,
+  follow_up_attempts INTEGER NOT NULL DEFAULT 0,
+  automation_enabled BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS site_contact_events (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  site_id UUID REFERENCES sites(id) ON DELETE CASCADE NOT NULL,
+  contact_history_id UUID REFERENCES site_contact_history(id) ON DELETE CASCADE NOT NULL,
+  event_type TEXT NOT NULL CHECK (event_type IN ('sent', 'open', 'click', 'follow_up_scheduled', 'follow_up_sent', 'follow_up_skipped', 'follow_up_canceled')),
+  url TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  user_agent TEXT,
+  ip_address_hash TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -108,6 +144,7 @@ ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sites ENABLE ROW LEVEL SECURITY;
 ALTER TABLE scan_results ENABLE ROW LEVEL SECURITY;
 ALTER TABLE site_contact_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE site_contact_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notification_preferences ENABLE ROW LEVEL SECURITY;
 
@@ -140,6 +177,15 @@ CREATE POLICY "Users see own site contact history" ON site_contact_history
     )
   );
 
+CREATE POLICY "Users see own site contact events" ON site_contact_events
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM sites
+      WHERE sites.id = site_contact_events.site_id
+        AND sites.user_id = auth.uid()
+    )
+  );
+
 -- Subscriptions: users can only see their own subscription (read-only; writes are via Stripe webhook/service role)
 CREATE POLICY "Users see own subscription" ON subscriptions
   FOR SELECT USING (auth.uid() = user_id);
@@ -158,6 +204,14 @@ CREATE INDEX IF NOT EXISTS idx_scan_results_user_id ON scan_results(user_id);
 CREATE INDEX IF NOT EXISTS idx_scan_results_scanned_at ON scan_results(scanned_at DESC);
 CREATE INDEX IF NOT EXISTS idx_site_contact_history_site_id ON site_contact_history(site_id);
 CREATE INDEX IF NOT EXISTS idx_site_contact_history_created_at ON site_contact_history(created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_site_contact_history_tracking_token ON site_contact_history(tracking_token);
+CREATE INDEX IF NOT EXISTS idx_site_contact_history_send_batch_id ON site_contact_history(send_batch_id);
+CREATE INDEX IF NOT EXISTS idx_site_contact_history_parent_id ON site_contact_history(parent_contact_history_id);
+CREATE INDEX IF NOT EXISTS idx_site_contact_history_lead_score ON site_contact_history(lead_score DESC);
+CREATE INDEX IF NOT EXISTS idx_site_contact_history_follow_up_status ON site_contact_history(follow_up_status, follow_up_scheduled_for DESC);
+CREATE INDEX IF NOT EXISTS idx_site_contact_events_contact_id ON site_contact_events(contact_history_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_site_contact_events_site_id ON site_contact_events(site_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_site_contact_events_type ON site_contact_events(event_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sites_monitoring ON sites(monitoring_active) WHERE monitoring_active = true;
 CREATE INDEX IF NOT EXISTS idx_sites_owner_email ON sites(owner_email);
