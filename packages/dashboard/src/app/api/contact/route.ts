@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
 
 const EMAIL_FROM = process.env.EMAIL_FROM || 'ADA Shield <audit@adashield.net>';
-const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'thirmal@wealthtalks.in';
-const SUPPORT_EMAIL_CC = process.env.SUPPORT_EMAIL_CC || 'tthirmal@gmail.com';
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'audit@adashield.net';
+const SUPPORT_EMAIL_CC = process.env.SUPPORT_EMAIL_CC || 'audit@adashield.net';
 const SUPPORT_EMAIL_TO = [SUPPORT_EMAIL, SUPPORT_EMAIL_CC];
 
 function getSmtpTransporter() {
