@@ -1,11 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
+import nodemailer from 'nodemailer';
 
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const EMAIL_FROM = process.env.EMAIL_FROM || 'ADA Shield <thirmal@wealthtalks.in>';
+const EMAIL_FROM = process.env.EMAIL_FROM || 'ADA Shield <audit@adashield.net>';
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'thirmal@wealthtalks.in';
 const SUPPORT_EMAIL_CC = process.env.SUPPORT_EMAIL_CC || 'tthirmal@gmail.com';
-// Both emails are TO recipients — avoids self-domain filtering on wealthtalks.in when sent via Resend
 const SUPPORT_EMAIL_TO = [SUPPORT_EMAIL, SUPPORT_EMAIL_CC];
+
+function getSmtpTransporter() {
+  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const port = parseInt(process.env.SMTP_PORT || '587', 10);
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  if (!user || !pass) return null;
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,
+    auth: { user, pass },
+    requireTLS: port !== 465,
+    tls: { rejectUnauthorized: true },
+  });
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -32,25 +47,20 @@ export async function POST(req: NextRequest) {
     const safeTopic = topic.trim().slice(0, 100);
     const safeMessage = message.trim().slice(0, 5000);
 
-    if (!RESEND_API_KEY) {
-      // Fallback: log and return success so the page doesn't break in dev without Resend
-      console.warn('[contact] RESEND_API_KEY not set — email not sent', { safeName, safeEmail, safeTopic });
+    const transporter = getSmtpTransporter();
+    if (!transporter) {
+      // Fallback: log and return success so the page doesn't break in dev without SMTP config
+      console.warn('[contact] SMTP not configured — email not sent', { safeName, safeEmail, safeTopic });
       return NextResponse.json({ ok: true });
     }
 
     // Send notification to support inbox
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: EMAIL_FROM,
-        to: SUPPORT_EMAIL_TO,
-        reply_to: safeEmail,
-        subject: `[ADA Shield Contact] ${safeTopic} — from ${safeName}`,
-        html: `
+    await transporter.sendMail({
+      from: EMAIL_FROM,
+      to: SUPPORT_EMAIL_TO,
+      replyTo: safeEmail,
+      subject: `[ADA Shield Contact] ${safeTopic} — from ${safeName}`,
+      html: `
           <div style="font-family:sans-serif;max-width:600px;margin:0 auto;color:#e2e8f0;background:#0f172a;padding:24px;border-radius:12px;">
             <h2 style="color:#fff;margin-bottom:4px;">New Contact Form Submission</h2>
             <p style="color:#94a3b8;font-size:14px;margin-top:0;">Via ADA Shield contact page</p>
@@ -66,27 +76,14 @@ export async function POST(req: NextRequest) {
             <p style="color:#475569;font-size:12px;margin-top:20px;">Reply directly to this email to respond to ${safeName}.</p>
           </div>
         `,
-      }),
     });
 
-    if (!res.ok) {
-      const err = await res.text();
-      console.error('[contact] Resend error', err);
-      return NextResponse.json({ error: 'Failed to send email. Please try again.' }, { status: 500 });
-    }
-
     // Send confirmation to the sender
-    await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: EMAIL_FROM,
-        to: [safeEmail],
-        subject: "We received your message — ADA Shield",
-        html: `
+    await transporter.sendMail({
+      from: EMAIL_FROM,
+      to: [safeEmail],
+      subject: "We received your message — ADA Shield",
+      html: `
           <div style="font-family:sans-serif;max-width:600px;margin:0 auto;color:#e2e8f0;background:#0f172a;padding:24px;border-radius:12px;">
             <h2 style="color:#fff;margin-bottom:4px;">Thanks for reaching out, ${safeName}!</h2>
             <p style="color:#94a3b8;font-size:14px;">We received your message about <strong style="color:#e2e8f0;">${safeTopic}</strong> and will respond within one business day.</p>
@@ -98,7 +95,6 @@ export async function POST(req: NextRequest) {
             <p style="color:#475569;font-size:12px;margin-top:8px;">— The ADA Shield Team</p>
           </div>
         `,
-      }),
     });
 
     return NextResponse.json({ ok: true });
