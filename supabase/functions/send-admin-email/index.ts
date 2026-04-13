@@ -1,4 +1,4 @@
-import { Resend } from 'npm:resend@4.0.0';
+import nodemailer from 'npm:nodemailer@6';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -60,23 +60,8 @@ function escapeHtml(value: unknown): string {
 
 function getVerifiedFromAddress(configured: string): string {
   const candidate = String(configured || '').trim();
-  const emailMatch = candidate.match(/<([^>]+)>/);
-  const email = (emailMatch ? emailMatch[1] : candidate).trim().toLowerCase();
-  const domain = email.includes('@') ? email.split('@')[1] : '';
-
-  const blockedDomains = new Set([
-    'gmail.com',
-    'yahoo.com',
-    'outlook.com',
-    'hotmail.com',
-    'icloud.com',
-    'aol.com',
-    'live.com',
-  ]);
-
-  if (!domain || blockedDomains.has(domain)) {
-    return 'ADA Shield <onboarding@resend.dev>';
-  }
+  return candidate || 'ADA Shield <audit@adashield.net>';
+}
 
   return candidate;
 }
@@ -96,12 +81,15 @@ Deno.serve(async (req) => {
     return jsonResponse(401, { error: 'Unauthorized' });
   }
 
-  const resendApiKey = Deno.env.get('RESEND_API_KEY') || '';
-  if (!resendApiKey || resendApiKey === 're_xxx') {
-    return jsonResponse(500, { error: 'RESEND_API_KEY is not configured' });
+  const smtpUser = Deno.env.get('SMTP_USER') || '';
+  const smtpPass = Deno.env.get('SMTP_PASS') || '';
+  if (!smtpUser || !smtpPass) {
+    return jsonResponse(500, { error: 'SMTP credentials not configured (SMTP_USER / SMTP_PASS)' });
   }
 
-  const configuredFrom = Deno.env.get('EMAIL_FROM') || 'ADA Shield <onboarding@resend.dev>';
+  const smtpHost = Deno.env.get('SMTP_HOST') || 'smtp.gmail.com';
+  const smtpPort = parseInt(Deno.env.get('SMTP_PORT') || '587', 10);
+  const configuredFrom = Deno.env.get('EMAIL_FROM') || `ADA Shield <${smtpUser}>`;
   const from = getVerifiedFromAddress(configuredFrom);
 
   let payload: SendAdminEmailPayload;
@@ -160,15 +148,20 @@ Deno.serve(async (req) => {
       emailPayload.cc = payload.cc.filter((email: string) => email && String(email).trim().length > 0).map((email: string) => String(email).trim());
     }
 
-    const { data, error } = await resend.emails.send(emailPayload);
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465,
+      auth: { user: smtpUser, pass: smtpPass },
+      requireTLS: smtpPort !== 465,
+      tls: { rejectUnauthorized: true },
+    });
 
-    if (error) {
-      return jsonResponse(500, { error: error.message || 'Failed to send email' });
-    }
+    const info = await transporter.sendMail(emailPayload);
 
     return jsonResponse(200, {
       success: true,
-      messageId: data?.id || null,
+      messageId: info.messageId || null,
       from,
       recipientCount: toList.length,
     });

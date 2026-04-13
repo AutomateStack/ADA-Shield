@@ -217,8 +217,12 @@ function initOutreachWorker() {
         html,
       });
 
+      if (!response) {
+        throw new Error('SMTP not configured — set SMTP_USER and SMTP_PASS in environment variables');
+      }
+
       await updateSiteContactHistoryEntry(followUpEntry.id, {
-        provider_message_id: response?.id || null,
+        provider_message_id: response?.messageId || null,
       });
 
       await createSiteContactEvent({
