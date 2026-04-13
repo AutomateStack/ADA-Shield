@@ -76,10 +76,10 @@ export default function ContactPage() {
                 <div>
                   <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Email</p>
                   <a
-                    href="mailto:thirmal@wealthtalks.in"
+                    href="mailto:audit@adashield.net"
                     className="text-sm text-slate-300 hover:text-white transition-colors"
                   >
-                    thirmal@wealthtalks.in
+                    audit@adashield.net
                   </a>
                 </div>
               </div>

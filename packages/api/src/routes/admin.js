@@ -489,7 +489,7 @@ function getEmailSendFailureMessage(rawMessage) {
     lower.includes('only send') && lower.includes('own email') ||
     lower.includes('onboarding@resend.dev')
   ) {
-    return 'Resend test mode restriction: onboarding@resend.dev can send only to limited/test recipients. Verify a custom domain and use EMAIL_FROM on that domain to send to any address.';
+    return 'Email sending failed. Please check your SMTP credentials (SMTP_USER / SMTP_PASS) in the environment variables.';
   }
 
   if (lower.includes('invalid') && lower.includes('email')) {
