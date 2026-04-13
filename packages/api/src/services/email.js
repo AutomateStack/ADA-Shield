@@ -1,3 +1,4 @@
+const dns = require('dns');
 const nodemailer = require('nodemailer');
 const { logger } = require('../utils/logger');
 
@@ -51,6 +52,11 @@ function getSmtpTransporter() {
     auth: { user, pass },
     requireTLS: port !== 465,
     tls: { rejectUnauthorized: true },
+    // Force IPv4 — Railway has no outbound IPv6 route. Passing a custom
+    // dnsLookup is the only reliable way to override resolution because
+    // dns.setDefaultResultOrder is not respected on all Node/Railway versions.
+    dnsLookup: (hostname, options, callback) =>
+      dns.lookup(hostname, { ...options, family: 4 }, callback),
     // Fail fast — do not hang for minutes on a bad connection
     connectionTimeout: 15000,
     greetingTimeout: 10000,
