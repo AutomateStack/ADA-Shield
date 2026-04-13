@@ -822,7 +822,7 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
             follow_up_status: 'canceled',
           });
         } catch (dbErr) {
-          logger.warn('Could not update contact entry status after send failure', { error: dbErr.message });
+          logger.warn('Could not update contact entry status after send failure', { siteId: site.id, recipient, error: dbErr?.message || String(dbErr) });
         }
         failures.push({ recipient, message: sendError.message });
         continue;
@@ -840,7 +840,7 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
           metadata: { automated: false, sendBatchId, recipient },
         });
       } catch (dbErr) {
-        logger.warn('Could not update contact entry after successful send', { error: dbErr.message });
+        logger.warn('Could not update contact entry after successful send', { siteId: site.id, recipient, error: dbErr?.message || String(dbErr) });
       }
 
       const scheduled = await scheduleFollowUp({
@@ -1096,7 +1096,7 @@ router.post('/sites/:siteId/send-followup', async (req, res, next) => {
             delivery_channel: deliveryChannel,
           });
         } catch (dbErr) {
-          logger.warn('Could not update contact entry status after send failure', { error: dbErr.message });
+          logger.warn('Could not update contact entry status after send failure', { siteId: site.id, recipient, error: dbErr?.message || String(dbErr) });
         }
         failures.push({ recipient, message: sendError.message });
         continue;
@@ -1114,7 +1114,7 @@ router.post('/sites/:siteId/send-followup', async (req, res, next) => {
           metadata: { automated: false, followUp: true, sendBatchId, recipient },
         });
       } catch (dbErr) {
-        logger.warn('Could not update contact entry after successful follow-up send', { error: dbErr.message });
+        logger.warn('Could not update contact entry after successful follow-up send', { siteId: site.id, recipient, error: dbErr?.message || String(dbErr) });
       }
 
       sentResults.push({ recipient, contactHistoryId: contactEntry.id, deliveryChannel });
