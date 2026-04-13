@@ -401,17 +401,17 @@ ADA Shield
       provider_message_id: providerMessageId,
     });
 
-    // Schedule follow-up automation (72h no-open rule)
+    // Schedule follow-up check at 1 week — if not opened, send follow-up then
     try {
       await scheduleFollowUp({
         contactHistoryId: contactEntry.id,
         rule: 'no_open',
-        delayMs: 72 * 60 * 60 * 1000,
+        delayMs: 7 * 24 * 60 * 60 * 1000,
       });
       await updateSiteContactHistoryEntry(contactEntry.id, {
         follow_up_status: 'scheduled',
         follow_up_rule: 'no_open',
-        follow_up_scheduled_for: new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString(),
+        follow_up_scheduled_for: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
       });
     } catch {
       // follow-ups are best-effort
