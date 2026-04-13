@@ -51,6 +51,9 @@ function getSmtpTransporter() {
     auth: { user, pass },
     requireTLS: port !== 465,
     tls: { rejectUnauthorized: true },
+    // Force IPv4 — Railway has no outbound IPv6 so smtp.gmail.com must not
+    // resolve to an AAAA record.
+    family: 4,
     // Fail fast — do not hang for minutes on a bad connection
     connectionTimeout: 15000,
     greetingTimeout: 10000,
