@@ -1,4 +1,4 @@
-const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
 const { logger } = require('../utils/logger');
 
 /**
@@ -27,50 +27,41 @@ function sanitizeSubject(value) {
   return String(value ?? '').replace(/[\r\n\t]/g, '').slice(0, 200);
 }
 
+const EMAIL_FROM = process.env.EMAIL_FROM || 'ADA Shield <audit@adashield.net>';
+
 /**
- * Creates a Resend client. Returns null if API key is not configured.
+ * Creates a nodemailer SMTP transporter using Google Workspace SMTP credentials.
+ * Returns null if SMTP credentials are not configured.
  */
-function getResendClient() {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey || apiKey === 're_xxx') {
+function getSmtpTransporter() {
+  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const port = parseInt(process.env.SMTP_PORT || '587', 10);
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+
+  if (!user || !pass) {
+    logger.warn('SMTP credentials not configured (SMTP_USER / SMTP_PASS) — skipping email');
     return null;
   }
-  return new Resend(apiKey);
+
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,   // true for 465 (SSL), false for 587 (STARTTLS)
+    auth: { user, pass },
+    // Ensure TLS on port 587
+    requireTLS: port !== 465,
+    tls: { rejectUnauthorized: true },
+  });
 }
 
-const EMAIL_FROM = process.env.EMAIL_FROM || 'ADA Shield <onboarding@resend.dev>';
-const RESEND_FALLBACK_FROM = 'ADA Shield <onboarding@resend.dev>';
-
 /**
- * Resend requires a verified sender domain (or onboarding@resend.dev for testing).
- * If a public email domain is configured as sender, fallback to onboarding sender.
- * @param {string} from
- * @returns {string}
+ * Kept for compatibility — returns the configured FROM address.
+ * With SMTP there is no domain restriction; the address just needs to match
+ * the authenticated Google Workspace account.
  */
 function getVerifiedFromAddress(from) {
-  const candidate = String(from || '').trim();
-  const emailMatch = candidate.match(/<([^>]+)>/);
-  const email = (emailMatch ? emailMatch[1] : candidate).trim().toLowerCase();
-  const domain = email.includes('@') ? email.split('@')[1] : '';
-  const blockedDomains = new Set([
-    'gmail.com',
-    'yahoo.com',
-    'outlook.com',
-    'hotmail.com',
-    'icloud.com',
-    'aol.com',
-    'live.com',
-  ]);
-
-  if (!domain || blockedDomains.has(domain)) {
-    logger.warn('EMAIL_FROM uses an unverified/public domain; falling back to Resend onboarding sender', {
-      configuredFrom: candidate || null,
-      fallbackFrom: RESEND_FALLBACK_FROM,
-    });
-    return RESEND_FALLBACK_FROM;
-  }
-
-  return candidate;
+  return String(from || EMAIL_FROM).trim() || EMAIL_FROM;
 }
 
 function detectIndustry(url) {
@@ -148,9 +139,9 @@ function getIndustryContext(industry) {
  * Sends a scan-complete email with the risk score summary.
  */
 async function sendScanCompleteEmail({ to, siteName, siteUrl, riskScore, riskLevel, totalViolations, criticalCount, seriousCount, dashboardUrl }) {
-  const resend = getResendClient();
-  if (!resend) {
-    logger.warn('Resend not configured — skipping scan complete email');
+  const transporter = getSmtpTransporter();
+  if (!transporter) {
+    logger.warn('SMTP not configured — skipping scan complete email');
     return null;
   }
 
@@ -163,7 +154,7 @@ async function sendScanCompleteEmail({ to, siteName, siteUrl, riskScore, riskLev
     const industry = detectIndustry(siteUrl);
     const { title, riskContext, callSignal } = getIndustryContext(industry, siteName);
   try {
-    const { data, error } = await resend.emails.send({
+    const info = await transporter.sendMail({
       from: getVerifiedFromAddress(EMAIL_FROM),
       to,
       subject: `${riskEmoji} Scan Complete: ${subjectSiteName} — Risk Score ${riskScore}/100`,
@@ -254,9 +245,8 @@ async function sendScanCompleteEmail({ to, siteName, siteUrl, riskScore, riskLev
 </html>`,
     });
 
-    if (error) throw error;
-    logger.info('Scan complete email sent', { to, siteName, messageId: data?.id });
-    return data;
+    logger.info('Scan complete email sent', { to, siteName, messageId: info.messageId });
+    return info;
   } catch (error) {
     logger.error('Failed to send scan complete email', { to, error: error.message });
     return null;
@@ -267,9 +257,9 @@ async function sendScanCompleteEmail({ to, siteName, siteUrl, riskScore, riskLev
  * Sends a high-risk alert email when a site scores above threshold.
  */
 async function sendRiskAlertEmail({ to, siteName, siteUrl, riskScore, criticalCount, seriousCount, dashboardUrl }) {
-  const resend = getResendClient();
-  if (!resend) {
-    logger.warn('Resend not configured — skipping risk alert email');
+  const transporter = getSmtpTransporter();
+  if (!transporter) {
+    logger.warn('SMTP not configured — skipping risk alert email');
     return null;
   }
 
@@ -281,7 +271,7 @@ async function sendRiskAlertEmail({ to, siteName, siteUrl, riskScore, criticalCo
   const industry = detectIndustry(siteUrl);
   const { title, riskContext, callSignal } = getIndustryContext(industry, siteName);
   try {
-    const { data, error } = await resend.emails.send({
+    const info = await transporter.sendMail({
       from: getVerifiedFromAddress(EMAIL_FROM),
       to,
       subject: `🚨 High Risk Alert: ${subjectSiteName} scored ${riskScore}/100`,
@@ -360,9 +350,8 @@ async function sendRiskAlertEmail({ to, siteName, siteUrl, riskScore, criticalCo
 </html>`,
     });
 
-    if (error) throw error;
-    logger.info('Risk alert email sent', { to, siteName, riskScore, messageId: data?.id });
-    return data;
+    logger.info('Risk alert email sent', { to, siteName, riskScore, messageId: info.messageId });
+    return info;
   } catch (error) {
     logger.error('Failed to send risk alert email', { to, error: error.message });
     return null;
@@ -373,9 +362,9 @@ async function sendRiskAlertEmail({ to, siteName, siteUrl, riskScore, criticalCo
  * Sends a weekly monitoring summary email.
  */
 async function sendWeeklySummaryEmail({ to, sites, dashboardUrl }) {
-  const resend = getResendClient();
-  if (!resend) {
-    logger.warn('Resend not configured — skipping weekly summary email');
+  const transporter = getSmtpTransporter();
+  if (!transporter) {
+    logger.warn('SMTP not configured — skipping weekly summary email');
     return null;
   }
 
@@ -398,7 +387,7 @@ async function sendWeeklySummaryEmail({ to, sites, dashboardUrl }) {
   const highRiskCount = sites.filter((s) => s.riskScore >= 70).length;
 
   try {
-    const { data, error } = await resend.emails.send({
+    const info = await transporter.sendMail({
       from: getVerifiedFromAddress(EMAIL_FROM),
       to,
       subject: `📊 Weekly ADA Report — ${highRiskCount > 0 ? `${highRiskCount} site(s) at high risk` : 'All looking good'}`,
@@ -476,9 +465,8 @@ async function sendWeeklySummaryEmail({ to, sites, dashboardUrl }) {
 </html>`,
     });
 
-    if (error) throw error;
-    logger.info('Weekly summary email sent', { to, siteCount: sites.length, messageId: data?.id });
-    return data;
+    logger.info('Weekly summary email sent', { to, siteCount: sites.length, messageId: info.messageId });
+    return info;
   } catch (error) {
     logger.error('Failed to send weekly summary email', { to, error: error.message });
     return null;
@@ -489,9 +477,9 @@ async function sendWeeklySummaryEmail({ to, sites, dashboardUrl }) {
  * Sends a generic email (used for admin outreach).
  */
 async function sendEmail({ to, subject, text, html, cc, from = EMAIL_FROM }) {
-  const resend = getResendClient();
-  if (!resend) {
-    logger.warn('Resend not configured — skipping email');
+  const transporter = getSmtpTransporter();
+  if (!transporter) {
+    logger.warn('SMTP not configured — skipping email');
     return null;
   }
 
@@ -531,11 +519,10 @@ async function sendEmail({ to, subject, text, html, cc, from = EMAIL_FROM }) {
       emailPayload.cc = cc;
     }
 
-    const { data, error } = await resend.emails.send(emailPayload);
+    const info = await transporter.sendMail(emailPayload);
 
-    if (error) throw error;
-    logger.info('Email sent', { to, subject: sanitizedSubject, messageId: data?.id });
-    return data;
+    logger.info('Email sent', { to, subject: sanitizedSubject, messageId: info.messageId });
+    return info;
   } catch (error) {
     logger.error('Failed to send email', { to, subject: sanitizedSubject, error: error.message });
     throw error;
