@@ -1,4 +1,7 @@
 const path = require('path');
+// Force IPv4 DNS resolution globally — Railway has no outbound IPv6 route
+// and smtp.gmail.com resolves to AAAA records first by default.
+require('dns').setDefaultResultOrder('ipv4first');
 require('dotenv').config({ path: path.resolve(__dirname, '../../../.env'), quiet: true });
 
 const express = require('express');
