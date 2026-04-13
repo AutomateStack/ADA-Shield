@@ -815,30 +815,33 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
         providerMessageId = emailInfo.messageId || null;
       } catch (sendError) {
         logger.error('Email send failed', { siteId: site.id, recipient, error: sendError.message });
-        await updateSiteContactHistoryEntry(contactEntry.id, {
-          delivery_status: 'failed',
-          delivery_channel: deliveryChannel,
-          follow_up_status: 'canceled',
-        });
+        try {
+          await updateSiteContactHistoryEntry(contactEntry.id, {
+            delivery_status: 'failed',
+            delivery_channel: deliveryChannel,
+            follow_up_status: 'canceled',
+          });
+        } catch (dbErr) {
+          logger.warn('Could not update contact entry status after send failure', { error: dbErr.message });
+        }
         failures.push({ recipient, message: sendError.message });
         continue;
       }
 
-      await updateSiteContactHistoryEntry(contactEntry.id, {
-        delivery_channel: deliveryChannel,
-        provider_message_id: providerMessageId,
-      });
-
-      await createSiteContactEvent({
-        siteId: site.id,
-        contactHistoryId: contactEntry.id,
-        eventType: 'sent',
-        metadata: {
-          automated: false,
-          sendBatchId,
-          recipient,
-        },
-      });
+      try {
+        await updateSiteContactHistoryEntry(contactEntry.id, {
+          delivery_channel: deliveryChannel,
+          provider_message_id: providerMessageId,
+        });
+        await createSiteContactEvent({
+          siteId: site.id,
+          contactHistoryId: contactEntry.id,
+          eventType: 'sent',
+          metadata: { automated: false, sendBatchId, recipient },
+        });
+      } catch (dbErr) {
+        logger.warn('Could not update contact entry after successful send', { error: dbErr.message });
+      }
 
       const scheduled = await scheduleFollowUp({
         contactHistoryId: contactEntry.id,
@@ -1087,25 +1090,32 @@ router.post('/sites/:siteId/send-followup', async (req, res, next) => {
         providerMessageId = emailInfo.messageId || null;
       } catch (sendError) {
         logger.error('Follow-up email send failed', { siteId: site.id, recipient, error: sendError.message });
-        await updateSiteContactHistoryEntry(contactEntry.id, {
-          delivery_status: 'failed',
-          delivery_channel: deliveryChannel,
-        });
+        try {
+          await updateSiteContactHistoryEntry(contactEntry.id, {
+            delivery_status: 'failed',
+            delivery_channel: deliveryChannel,
+          });
+        } catch (dbErr) {
+          logger.warn('Could not update contact entry status after send failure', { error: dbErr.message });
+        }
         failures.push({ recipient, message: sendError.message });
         continue;
       }
 
-      await updateSiteContactHistoryEntry(contactEntry.id, {
-        delivery_channel: deliveryChannel,
-        provider_message_id: providerMessageId,
-      });
-
-      await createSiteContactEvent({
-        siteId: site.id,
-        contactHistoryId: contactEntry.id,
-        eventType: 'sent',
-        metadata: { automated: false, followUp: true, sendBatchId, recipient },
-      });
+      try {
+        await updateSiteContactHistoryEntry(contactEntry.id, {
+          delivery_channel: deliveryChannel,
+          provider_message_id: providerMessageId,
+        });
+        await createSiteContactEvent({
+          siteId: site.id,
+          contactHistoryId: contactEntry.id,
+          eventType: 'sent',
+          metadata: { automated: false, followUp: true, sendBatchId, recipient },
+        });
+      } catch (dbErr) {
+        logger.warn('Could not update contact entry after successful follow-up send', { error: dbErr.message });
+      }
 
       sentResults.push({ recipient, contactHistoryId: contactEntry.id, deliveryChannel });
     }

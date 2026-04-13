@@ -47,11 +47,14 @@ function getSmtpTransporter() {
   return nodemailer.createTransport({
     host,
     port,
-    secure: port === 465,   // true for 465 (SSL), false for 587 (STARTTLS)
+    secure: port === 465,
     auth: { user, pass },
-    // Ensure TLS on port 587
     requireTLS: port !== 465,
     tls: { rejectUnauthorized: true },
+    // Fail fast — do not hang for minutes on a bad connection
+    connectionTimeout: 15000,
+    greetingTimeout: 10000,
+    socketTimeout: 20000,
   });
 }
 
