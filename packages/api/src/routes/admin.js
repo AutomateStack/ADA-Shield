@@ -798,49 +798,30 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
         trackingToken,
       });
 
-      let deliveryChannel = 'supabase-function';
+      let deliveryChannel = 'smtp';
       let providerMessageId = null;
 
       try {
-        const response = await invokeSupabaseFunction('send-admin-email', {
+        const emailInfo = await sendEmail({
           to: [recipient],
-          cc: index === 0 && ccRecipients.length > 0 ? ccRecipients : undefined,
           subject: parsed.data.subject,
-          message: trackedText,
           text: trackedText,
           html: trackedHtml,
-          siteId: site.id,
-          siteName: site.name,
-          siteUrl: site.url,
+          cc: index === 0 && ccRecipients.length > 0 ? ccRecipients : undefined,
         });
-        providerMessageId = response?.messageId || null;
-      } catch (edgeError) {
-        logger.warn('Edge function send failed, using local email fallback', {
-          siteId: site.id,
-          recipient,
-          error: edgeError.message,
-        });
-
-        try {
-          deliveryChannel = 'api-fallback';
-          const fallbackResponse = await sendEmail({
-            to: [recipient],
-            subject: parsed.data.subject,
-            text: trackedText,
-            html: trackedHtml,
-            cc: index === 0 ? ccRecipients : undefined,
-          });
-          providerMessageId = fallbackResponse?.id || null;
-        } catch (fallbackError) {
-          const providerMessage = fallbackError?.message || edgeError?.message || 'Failed to send email';
-          await updateSiteContactHistoryEntry(contactEntry.id, {
-            delivery_status: 'failed',
-            delivery_channel: deliveryChannel,
-            follow_up_status: 'canceled',
-          });
-          failures.push({ recipient, message: providerMessage });
-          continue;
+        if (!emailInfo) {
+          throw new Error('SMTP not configured — set SMTP_USER and SMTP_PASS in environment variables');
         }
+        providerMessageId = emailInfo.messageId || null;
+      } catch (sendError) {
+        logger.error('Email send failed', { siteId: site.id, recipient, error: sendError.message });
+        await updateSiteContactHistoryEntry(contactEntry.id, {
+          delivery_status: 'failed',
+          delivery_channel: deliveryChannel,
+          follow_up_status: 'canceled',
+        });
+        failures.push({ recipient, message: sendError.message });
+        continue;
       }
 
       await updateSiteContactHistoryEntry(contactEntry.id, {
@@ -862,7 +843,7 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
       const scheduled = await scheduleFollowUp({
         contactHistoryId: contactEntry.id,
         rule: 'no_open',
-        delayMs: 72 * 60 * 60 * 1000,
+        delayMs: 7 * 24 * 60 * 60 * 1000,
       });
 
       if (scheduled) {
@@ -1091,38 +1072,27 @@ router.post('/sites/:siteId/send-followup', async (req, res, next) => {
       });
 
       let providerMessageId = null;
-      let deliveryChannel = 'supabase-function';
+      let deliveryChannel = 'smtp';
 
       try {
-        const response = await invokeSupabaseFunction('send-admin-email', {
+        const emailInfo = await sendEmail({
           to: [recipient],
           subject: parsed.data.subject,
           text: trackedText,
           html: trackedHtml,
-          siteId: site.id,
-          siteName: site.name,
-          siteUrl: site.url,
         });
-        providerMessageId = response?.messageId || null;
-      } catch (edgeError) {
-        try {
-          deliveryChannel = 'api-fallback';
-          const fallbackResponse = await sendEmail({
-            to: [recipient],
-            subject: parsed.data.subject,
-            text: trackedText,
-            html: trackedHtml,
-          });
-          providerMessageId = fallbackResponse?.id || null;
-        } catch (fallbackError) {
-          const providerMessage = fallbackError?.message || edgeError?.message || 'Failed to send email';
-          await updateSiteContactHistoryEntry(contactEntry.id, {
-            delivery_status: 'failed',
-            delivery_channel: deliveryChannel,
-          });
-          failures.push({ recipient, message: providerMessage });
-          continue;
+        if (!emailInfo) {
+          throw new Error('SMTP not configured — set SMTP_USER and SMTP_PASS in environment variables');
         }
+        providerMessageId = emailInfo.messageId || null;
+      } catch (sendError) {
+        logger.error('Follow-up email send failed', { siteId: site.id, recipient, error: sendError.message });
+        await updateSiteContactHistoryEntry(contactEntry.id, {
+          delivery_status: 'failed',
+          delivery_channel: deliveryChannel,
+        });
+        failures.push({ recipient, message: sendError.message });
+        continue;
       }
 
       await updateSiteContactHistoryEntry(contactEntry.id, {

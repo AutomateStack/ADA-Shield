@@ -359,41 +359,28 @@ ADA Shield
       trackingToken,
     });
 
-    let deliveryChannel = 'supabase-function';
+    let deliveryChannel = 'smtp';
     let providerMessageId = null;
 
     try {
-      const resp = await invokeSupabaseFunction('send-admin-email', {
+      const emailInfo = await sendEmail({
         to: [recipient],
         subject,
-        message: trackedText,
         text: trackedText,
         html: trackedHtml,
-        siteId: site.id,
-        siteName,
-        siteUrl: site.url,
       });
-      providerMessageId = resp?.messageId || null;
-    } catch (edgeErr) {
-      logger.warn('Bulk: edge function failed, using fallback', { siteId, recipient, error: edgeErr.message });
-      try {
-        deliveryChannel = 'api-fallback';
-        const fallbackResp = await sendEmail({
-          to: [recipient],
-          subject,
-          text: trackedText,
-          html: trackedHtml,
-        });
-        providerMessageId = fallbackResp?.id || null;
-      } catch (fallbackErr) {
-        await updateSiteContactHistoryEntry(contactEntry.id, {
-          delivery_status: 'failed',
-          delivery_channel: deliveryChannel,
-          follow_up_status: 'canceled',
-        });
-        logger.error('Bulk: email send failed', { siteId, recipient, error: fallbackErr.message });
-        continue;
+      if (!emailInfo) {
+        throw new Error('SMTP not configured — set SMTP_USER and SMTP_PASS in environment variables');
       }
+      providerMessageId = emailInfo.messageId || null;
+    } catch (sendErr) {
+      logger.error('Bulk: email send failed', { siteId, recipient, error: sendErr.message });
+      await updateSiteContactHistoryEntry(contactEntry.id, {
+        delivery_status: 'failed',
+        delivery_channel: deliveryChannel,
+        follow_up_status: 'canceled',
+      });
+      continue;
     }
 
     await updateSiteContactHistoryEntry(contactEntry.id, {
