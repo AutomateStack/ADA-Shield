@@ -43,6 +43,14 @@ const DEFAULT_DAILY_LIMIT = 2;
 const SETTINGS_TABLE = 'bulk_import_settings';
 const SETTINGS_ROW_ID = 'global';
 
+// Minimum days between any two outreach emails to the same site.
+// Prevents same-day duplicates and ensures respectful send cadence.
+// Override with MIN_DAYS_BETWEEN_OUTREACH env var (must be >= 1).
+const MIN_DAYS_BETWEEN_OUTREACH = Math.max(
+  1,
+  parseInt(process.env.MIN_DAYS_BETWEEN_OUTREACH || '4', 10) || 4
+);
+
 let bulkQueue = null;
 let bulkWorker = null;
 
@@ -128,7 +136,9 @@ async function setBulkDailyLimit(dailyLimit) {
 
 async function enqueuePendingBulkSites(limit) {
   const safeLimit = sanitizeDailyLimit(limit);
-  const threshold = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  // Only pick sites not contacted within the last MIN_DAYS_BETWEEN_OUTREACH days.
+  // This is the primary query-level guard; processOneSite adds a second runtime check.
+  const threshold = new Date(Date.now() - MIN_DAYS_BETWEEN_OUTREACH * 24 * 60 * 60 * 1000).toISOString();
 
   const { data: pending, error } = await supabase
     .from('sites')
@@ -191,9 +201,11 @@ async function enqueueBulkSite({ siteId, batchId }) {
   if (!queue) {
     throw new Error('Bulk outreach queue not available — REDIS_URL not configured');
   }
-  // Use a batch-scoped job id so the same site can be retried in future runs.
-  // A permanent site-level job id blocks re-enqueue after a prior fail/complete.
-  const batchScope = batchId || `adhoc-${Date.now()}`;
+  // Use a date-scoped job ID so the same site cannot be enqueued more than once
+  // per calendar day. adhoc-${Date.now()} would create a unique ID every call
+  // and allow the daily trigger to double-queue a site after a server restart.
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const batchScope = batchId || `daily-${today}`;
   const job = await queue.add('process-site', { siteId, batchId }, {
     jobId: `bulk-${siteId}-${batchScope}`,
   });
@@ -220,12 +232,17 @@ async function scheduleDailyTrigger() {
 
   const cronExpression = (process.env.BULK_OUTREACH_CRON || '0 9 * * *').trim();
 
-  // Remove any existing repeatable job first so the new schedule takes effect
-  // immediately on next deploy rather than waiting for the old schedule to tick.
+  // Remove ALL existing 'daily-trigger' repeatable jobs regardless of cron expression
+  // so a changed schedule takes effect immediately on redeploy instead of running both.
   try {
-    await queue.removeRepeatable('daily-trigger', { cron: cronExpression, jobId: 'bulk-daily-trigger' });
+    const repeatables = await queue.getRepeatableJobs();
+    await Promise.all(
+      repeatables
+        .filter((j) => j.name === 'daily-trigger')
+        .map((j) => queue.removeRepeatableByKey(j.key))
+    );
   } catch {
-    // Ignore — job may not exist yet on first run
+    // Ignore — no jobs may exist yet on first run
   }
 
   await queue.add(
@@ -244,6 +261,22 @@ async function scheduleDailyTrigger() {
 async function processOneSite(siteId, batchId) {
   const site = await getSiteById(siteId);
   if (!site) throw new Error(`Site ${siteId} not found`);
+
+  // Runtime cooldown guard — a second layer of protection in case the same site
+  // slips through enqueuePendingBulkSites (e.g. job was queued before last_contacted_at
+  // was written, or the server restarted mid-batch and re-enqueued).
+  if (site.last_contacted_at) {
+    const daysSince = (Date.now() - new Date(site.last_contacted_at).getTime()) / (1000 * 60 * 60 * 24);
+    if (daysSince < MIN_DAYS_BETWEEN_OUTREACH) {
+      logger.warn('Bulk: skipping site — contacted too recently', {
+        siteId,
+        lastContactedAt: site.last_contacted_at,
+        daysSince: daysSince.toFixed(1),
+        minDays: MIN_DAYS_BETWEEN_OUTREACH,
+      });
+      return { siteId, skipped: true, reason: 'contacted_too_recently', daysSince: parseFloat(daysSince.toFixed(1)) };
+    }
+  }
 
   // 1. Scan
   logger.info('Bulk: scanning site', { siteId, url: site.url });
