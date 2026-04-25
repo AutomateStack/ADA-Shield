@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, ChevronLeft, ChevronRight, Save, Globe, Send, X, PauseCircle, PlayCircle } from 'lucide-react';
+import { RefreshCw, ChevronLeft, ChevronRight, Save, Globe, Send, X, PauseCircle, PlayCircle, Download, CheckSquare, Square } from 'lucide-react';
 
 // Simple relative time formatter
 const formatRelativeTime = (dateString: string | null): string => {
@@ -124,6 +124,8 @@ export default function AdminSitesPage() {
   const [drafts, setDrafts] = useState<Record<string, DraftRow>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [pausing, setPausing] = useState<Record<string, boolean>>({});
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkPausing, setBulkPausing] = useState(false);
   const [emailModal, setEmailModal] = useState<EmailModal | null>(null);
   const [emailSending, setEmailSending] = useState(false);
   const [emailTemplateLoading, setEmailTemplateLoading] = useState(false);
@@ -259,6 +261,70 @@ export default function AdminSitesPage() {
     } finally {
       setSaving((prev) => ({ ...prev, [siteId]: false }));
     }
+  };
+
+  const toggleSelect = (siteId: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(siteId) ? next.delete(siteId) : next.add(siteId);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (!data) return;
+    if (selected.size === data.sites.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(data.sites.map((s) => s.id)));
+    }
+  };
+
+  const bulkSetPause = async (outreach_paused: boolean) => {
+    if (selected.size === 0) return;
+    setBulkPausing(true);
+    try {
+      const res = await fetch(`${apiUrl}/api/admin/sites/bulk-pause`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret },
+        body: JSON.stringify({ siteIds: Array.from(selected), outreach_paused }),
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload.error || 'Bulk pause failed');
+      }
+      setSelected(new Set());
+      await fetchSites();
+    } catch (err: any) {
+      alert(err.message || 'Bulk pause failed');
+    } finally {
+      setBulkPausing(false);
+    }
+  };
+
+  const exportCsv = () => {
+    if (!data) return;
+    const rows = [
+      ['Name', 'URL', 'Owner Email', 'Risk Score', 'Contacted', 'Last Contacted', 'Paused', 'Notes'],
+      ...data.sites.map((s) => [
+        s.name || '',
+        s.url,
+        s.owner_email || '',
+        s.latest_risk_score ?? '',
+        s.contacted_count,
+        s.last_contacted_at || '',
+        s.outreach_paused ? 'yes' : 'no',
+        (s.notes || '').replace(/"/g, '""'),
+      ]),
+    ];
+    const csv = rows.map((r) => r.map((v) => `"${v}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sites-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const openEmailModal = async (site: AdminSite) => {
@@ -429,12 +495,23 @@ export default function AdminSitesPage() {
             Track site owner contact info (includes free scans & authenticated users)
           </p>
         </div>
-        <button
-          onClick={fetchSites}
-          className="p-2 text-slate-400 hover:text-white bg-white/5 border border-white/10 rounded-lg transition-colors"
-        >
-          <RefreshCw className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={exportCsv}
+            disabled={!data || data.sites.length === 0}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-300 hover:text-white bg-white/5 border border-white/10 rounded-lg transition-colors disabled:opacity-40"
+            title="Export current page as CSV"
+          >
+            <Download className="h-4 w-4" />
+            <span className="hidden sm:inline">Export CSV</span>
+          </button>
+          <button
+            onClick={fetchSites}
+            className="p-2 text-slate-400 hover:text-white bg-white/5 border border-white/10 rounded-lg transition-colors"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -518,11 +595,46 @@ export default function AdminSitesPage() {
         )}
       </div>
 
+      {selected.size > 0 && (
+        <div className="flex items-center gap-3 px-4 py-3 bg-indigo-600/10 border border-indigo-500/30 rounded-xl">
+          <span className="text-sm text-indigo-300 font-medium">{selected.size} selected</span>
+          <button
+            onClick={() => bulkSetPause(true)}
+            disabled={bulkPausing}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-300 bg-amber-600/10 border border-amber-500/30 rounded-md hover:bg-amber-600/20 transition-colors disabled:opacity-60"
+          >
+            {bulkPausing ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <PauseCircle className="h-3.5 w-3.5" />}
+            Pause All
+          </button>
+          <button
+            onClick={() => bulkSetPause(false)}
+            disabled={bulkPausing}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-green-300 bg-green-600/10 border border-green-500/30 rounded-md hover:bg-green-600/20 transition-colors disabled:opacity-60"
+          >
+            {bulkPausing ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <PlayCircle className="h-3.5 w-3.5" />}
+            Resume All
+          </button>
+          <button
+            onClick={() => setSelected(new Set())}
+            className="ml-auto text-xs text-slate-400 hover:text-white transition-colors"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
       <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-white/10 text-left">
+                <th className="px-4 py-3 w-8">
+                  <button onClick={toggleSelectAll} className="text-slate-400 hover:text-white">
+                    {data && selected.size === data.sites.length && data.sites.length > 0
+                      ? <CheckSquare className="h-4 w-4 text-indigo-400" />
+                      : <Square className="h-4 w-4" />}
+                  </button>
+                </th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Site</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Status</th>
                 <th className="px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">New Risk</th>
@@ -551,14 +663,14 @@ export default function AdminSitesPage() {
             <tbody className="divide-y divide-white/5">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
+                  <td colSpan={8} className="px-4 py-12 text-center text-slate-500">
                     <RefreshCw className="h-5 w-5 animate-spin mx-auto mb-2" />
                     Loading sites...
                   </td>
                 </tr>
               ) : !data || data.sites.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
+                  <td colSpan={8} className="px-4 py-12 text-center text-slate-500">
                     No sites found
                   </td>
                 </tr>
@@ -570,6 +682,13 @@ export default function AdminSitesPage() {
 
                   return (
                     <tr key={site.id} className="hover:bg-white/[0.02] transition-colors align-top">
+                      <td className="px-4 py-3 w-8">
+                        <button onClick={() => toggleSelect(site.id)} className="text-slate-400 hover:text-indigo-400">
+                          {selected.has(site.id)
+                            ? <CheckSquare className="h-4 w-4 text-indigo-400" />
+                            : <Square className="h-4 w-4" />}
+                        </button>
+                      </td>
                       <td className="px-4 py-3 min-w-[220px]">
                         <div className="font-medium text-slate-200">{site.name || 'Unnamed site'}</div>
                         <div className="text-xs text-slate-500 break-all mt-0.5 inline-flex items-center gap-1">

@@ -30,7 +30,7 @@ const {
 const { saveScanResult, updateSiteLastScanned } = require('../db/scans');
 const { createOrUpdateFreeScanSite } = require('../db/sites');
 const { invokeSupabaseFunction } = require('../services/supabase-functions');
-const { sendEmail, detectIndustry, getIndustryContext } = require('../services/email');
+const { sendEmail, sendDigestEmail, detectIndustry, getIndustryContext } = require('../services/email');
 const { scheduleFollowUp, cancelFollowUp } = require('../services/outreach-queue');
 const {
   buildTrackingUrls,
@@ -39,6 +39,8 @@ const {
   buildReportUrl,
 } = require('../services/outreach-tracking');
 const { isEmailSuppressed, getEmailSuppressions, removeEmailSuppression } = require('../db/suppressions');
+const { getOutreachDigestStats, getOutreachAnalytics, getPipelineLeads } = require('../db/admin');
+const { supabase } = require('../db/supabase');
 
 const router = Router();
 
@@ -1186,7 +1188,7 @@ router.get('/subscriptions', async (req, res, next) => {
 });
 
 // ── Blog Posts ──────────────────────────────────────────────────────
-const { supabase: adminSupabase } = require('../db/supabase');
+const adminSupabase = supabase;
 
 // List all posts (drafts + published)
 router.get('/blog', async (req, res, next) => {
@@ -1309,6 +1311,70 @@ router.delete('/suppressions/:email', adminAuth, async (req, res, next) => {
     if (!email) return res.status(400).json({ error: 'Email is required' });
     await removeEmailSuppression(email);
     return res.json({ removed: true, email });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Digest Trigger ─────────────────────────────────────────────────
+
+router.post('/digest/send-now', adminAuth, async (req, res, next) => {
+  try {
+    const to = process.env.DIGEST_EMAIL_TO;
+    if (!to) return res.status(400).json({ error: 'DIGEST_EMAIL_TO is not configured' });
+
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const stats = await getOutreachDigestStats(since);
+    const result = await sendDigestEmail({ to: [to], stats, periodLabel: 'Manual Trigger' });
+    if (!result) return res.status(500).json({ error: 'Failed to send digest email — check RESEND_API_KEY' });
+
+    return res.json({ sent: true, messageId: result.messageId, to });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Bulk Pause ─────────────────────────────────────────────────────
+
+const bulkPauseSchema = z.object({
+  siteIds: z.array(z.string().uuid()).min(1).max(200),
+  outreach_paused: z.boolean(),
+});
+
+router.patch('/sites/bulk-pause', adminAuth, async (req, res, next) => {
+  try {
+    const parsed = bulkPauseSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+    }
+    const { siteIds, outreach_paused } = parsed.data;
+    const { error } = await supabase.from('sites').update({ outreach_paused }).in('id', siteIds);
+    if (error) throw error;
+    adminReadCache.clear();
+    return res.json({ updated: siteIds.length, outreach_paused });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Analytics ──────────────────────────────────────────────────────
+
+router.get('/analytics', adminAuth, async (req, res, next) => {
+  try {
+    const days = Math.min(90, Math.max(7, parseInt(req.query.days || '30', 10)));
+    const data = await getOutreachAnalytics(days);
+    return res.json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Pipeline ───────────────────────────────────────────────────────
+
+router.get('/pipeline', adminAuth, async (req, res, next) => {
+  try {
+    const data = await getPipelineLeads();
+    return res.json(data);
   } catch (error) {
     next(error);
   }

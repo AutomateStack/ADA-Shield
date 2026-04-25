@@ -537,6 +537,8 @@ export default function AdminOutreachPage() {
   const [followUpSort, setFollowUpSort] = useState<'days' | 'score'>('days');
   const [clickSortBy, setClickSortBy] = useState<'clicks' | 'clickRate' | 'recency'>('clicks');
 
+  const [digestSending, setDigestSending] = useState(false);
+
   // Toast
   const [toasts, setToasts] = useState<Array<{ id: string; message: string; type: 'success' | 'error' }>>([]);
   const addToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
@@ -548,6 +550,25 @@ export default function AdminOutreachPage() {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
   const adminSecret = process.env.NEXT_PUBLIC_ADMIN_SECRET || '';
   const headers = { 'x-admin-secret': adminSecret };
+
+  const sendDigestNow = async () => {
+    setDigestSending(true);
+    try {
+      const res = await fetch(`${apiUrl}/api/admin/digest/send-now`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload.error || 'Failed to send digest');
+      }
+      addToast('Digest email sent successfully', 'success');
+    } catch (err: any) {
+      addToast(err.message || 'Failed to send digest', 'error');
+    } finally {
+      setDigestSending(false);
+    }
+  };
 
   // â”€â”€ Data fetchers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -780,14 +801,25 @@ export default function AdminOutreachPage() {
             <p className="text-xs text-slate-600 mt-0.5">Updated {formatRelativeTime(lastRefreshed.toISOString())}</p>
           )}
         </div>
-        <button
-          onClick={currentRefresh}
-          disabled={isLoading}
-          className="flex items-center gap-2 px-3 py-2 text-sm text-slate-400 hover:text-white bg-white/5 border border-white/10 rounded-lg transition-colors disabled:opacity-50"
-        >
-          <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-          <span className="hidden sm:inline">Refresh</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={sendDigestNow}
+            disabled={digestSending}
+            className="flex items-center gap-2 px-3 py-2 text-sm text-indigo-300 hover:text-white bg-indigo-600/10 hover:bg-indigo-600/20 border border-indigo-500/30 rounded-lg transition-colors disabled:opacity-50"
+            title="Send the daily digest email right now"
+          >
+            {digestSending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+            <span className="hidden sm:inline">Send Digest</span>
+          </button>
+          <button
+            onClick={currentRefresh}
+            disabled={isLoading}
+            className="flex items-center gap-2 px-3 py-2 text-sm text-slate-400 hover:text-white bg-white/5 border border-white/10 rounded-lg transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">Refresh</span>
+          </button>
+        </div>
       </div>
 
       {/* Tab nav */}

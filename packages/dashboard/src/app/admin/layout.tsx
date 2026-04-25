@@ -12,6 +12,8 @@ import {
   Globe,
   Mail,
   Upload,
+  Kanban,
+  BarChart2,
 } from 'lucide-react';
 import { ShieldLogo } from '@/components/ui/shield-logo';
 import { cn } from '@/lib/utils';
@@ -22,6 +24,8 @@ const adminNavItems = [
   { href: '/admin/sites', label: 'Sites', icon: Globe },
   { href: '/admin/outreach', label: 'Outreach', icon: Mail },
   { href: '/admin/bulk-import', label: 'Bulk Import', icon: Upload },
+  { href: '/admin/pipeline', label: 'Pipeline', icon: Kanban },
+  { href: '/admin/analytics', label: 'Analytics', icon: BarChart2 },
   { href: '/admin/users', label: 'Users', icon: Users },
   { href: '/admin/subscriptions', label: 'Subscriptions', icon: CreditCard },
   { href: '/admin/blog', label: 'Blog', icon: FileText },
