@@ -205,6 +205,45 @@ async function getAdminUsers({ page = 1, limit = 20 } = {}) {
   }
 }
 
+async function getUserDetail(userId) {
+  const { data: sites, error: sitesError } = await supabase
+    .from('sites')
+    .select('id, url, name, created_at, last_scanned_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+  if (sitesError) throw sitesError;
+
+  if (!sites || sites.length === 0) return { sites: [] };
+
+  const siteIds = sites.map((s) => s.id);
+
+  const { data: scans, error: scansError } = await supabase
+    .from('scan_results')
+    .select('id, site_id, risk_score, total_violations, critical_count, serious_count, created_at, public_token')
+    .in('site_id', siteIds)
+    .order('created_at', { ascending: false });
+  if (scansError) throw scansError;
+
+  const latestScanMap = {};
+  const scanCountMap = {};
+  for (const scan of scans || []) {
+    if (!latestScanMap[scan.site_id]) latestScanMap[scan.site_id] = scan;
+    scanCountMap[scan.site_id] = (scanCountMap[scan.site_id] || 0) + 1;
+  }
+
+  return {
+    sites: sites.map((site) => ({
+      id: site.id,
+      url: site.url,
+      name: site.name,
+      createdAt: site.created_at,
+      lastScannedAt: site.last_scanned_at,
+      scanCount: scanCountMap[site.id] || 0,
+      latestScan: latestScanMap[site.id] || null,
+    })),
+  };
+}
+
 // ── Subscription Listings ───────────────────────────────────────────
 
 /**
@@ -1338,6 +1377,7 @@ module.exports = {
   getAdminScans,
   getTopScannedUrls,
   getAdminUsers,
+  getUserDetail,
   getAdminSubscriptions,
   getAdminScanDetail,
   getAdminSites,

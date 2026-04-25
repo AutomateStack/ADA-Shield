@@ -164,6 +164,16 @@ router.get('/users', async (req, res, next) => {
   }
 });
 
+router.get('/users/:userId', adminAuth, async (req, res, next) => {
+  try {
+    const { getUserDetail } = require('../db/admin');
+    const detail = await getUserDetail(req.params.userId);
+    return res.json(detail);
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ── Sites ───────────────────────────────────────────────────────────
 router.get('/sites', async (req, res, next) => {
   try {
