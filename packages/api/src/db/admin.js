@@ -1260,6 +1260,79 @@ async function getOutreachDigestStats(since) {
   };
 }
 
+async function getOutreachAnalytics(days = 30) {
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  const { data: entries, error } = await supabase
+    .from('site_contact_history')
+    .select('created_at, opens_count, clicks_count, replied_at')
+    .eq('delivery_status', 'sent')
+    .gte('created_at', since)
+    .order('created_at', { ascending: true });
+
+  if (error) throw error;
+
+  const byDate = {};
+  for (const entry of entries || []) {
+    const date = entry.created_at.slice(0, 10);
+    if (!byDate[date]) byDate[date] = { date, sent: 0, opened: 0, clicked: 0, replied: 0 };
+    byDate[date].sent++;
+    if ((entry.opens_count || 0) > 0) byDate[date].opened++;
+    if ((entry.clicks_count || 0) > 0) byDate[date].clicked++;
+    if (entry.replied_at) byDate[date].replied++;
+  }
+
+  const list = entries || [];
+  const totalSent = list.length;
+  const totalOpened = list.filter((e) => (e.opens_count || 0) > 0).length;
+  const totalClicked = list.filter((e) => (e.clicks_count || 0) > 0).length;
+  const totalReplied = list.filter((e) => e.replied_at).length;
+
+  return {
+    timeSeries: Object.values(byDate),
+    funnel: {
+      sent: totalSent,
+      opened: totalOpened,
+      clicked: totalClicked,
+      replied: totalReplied,
+      openRate: totalSent > 0 ? Math.round((totalOpened / totalSent) * 100) : 0,
+      clickRate: totalSent > 0 ? Math.round((totalClicked / totalSent) * 100) : 0,
+      replyRate: totalSent > 0 ? Math.round((totalReplied / totalSent) * 100) : 0,
+    },
+    days,
+  };
+}
+
+async function getPipelineLeads() {
+  const { data, error } = await supabase
+    .from('site_contact_history')
+    .select(`
+      id, site_id, recipient_email, subject, lead_score, lead_status,
+      opens_count, clicks_count, last_engagement_at, created_at,
+      follow_up_status, replied_at, unsubscribed_at, bounced_at,
+      sites(id, name, url)
+    `)
+    .eq('delivery_status', 'sent')
+    .is('parent_contact_history_id', null)
+    .order('lead_score', { ascending: false })
+    .limit(500);
+
+  if (error) throw error;
+
+  const grouped = { hot: [], warm: [], cold: [] };
+  for (const entry of data || []) {
+    const status = entry.lead_status || 'cold';
+    if (grouped[status]) grouped[status].push(entry);
+  }
+
+  return {
+    hot: grouped.hot,
+    warm: grouped.warm,
+    cold: grouped.cold,
+    total: (data || []).length,
+  };
+}
+
 module.exports = {
   getAdminStats,
   getAdminScans,
@@ -1287,4 +1360,6 @@ module.exports = {
   getFollowUpHistory,
   getFollowUpDueSites,
   getOutreachDigestStats,
+  getOutreachAnalytics,
+  getPipelineLeads,
 };
