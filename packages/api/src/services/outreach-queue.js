@@ -16,6 +16,7 @@ const {
   buildTrackingUrls,
   injectTrackedLink,
 } = require('./outreach-tracking');
+const { isEmailSuppressed } = require('../db/suppressions');
 const { logger } = require('../utils/logger');
 
 const QUEUE_NAME = 'outreach-followups';
@@ -103,6 +104,12 @@ function extractFirstName(ownerName) {
 function canSendFollowUp(contact, rule) {
   if (!contact || !contact.automation_enabled || contact.delivery_status !== 'sent') return false;
 
+  // Never send to contacts who opted out, bounced, or complained
+  if (contact.unsubscribed_at || contact.bounced_at || contact.complained_at) return false;
+
+  // Don't follow up once they've replied — they're already engaged
+  if (contact.replied_at) return false;
+
   // Hard cap: max 6 total follow-ups per contact to prevent spam
   if (Number(contact.follow_up_attempts || 0) >= 6) return false;
 
@@ -162,6 +169,14 @@ function initOutreachWorker() {
         return { status: 'skipped', reason: 'rule_conditions_not_met' };
       }
 
+      // Second-layer suppression check against the live suppressions table
+      const suppressed = await isEmailSuppressed(contact.recipient_email);
+      if (suppressed) {
+        logger.info('Follow-up skipped — recipient is suppressed', { contactHistoryId, rule, recipient: contact.recipient_email });
+        await markFollowUpSkipped(contact, rule, 'email_suppressed');
+        return { status: 'skipped', reason: 'email_suppressed' };
+      }
+
       const [site, latestScan] = await Promise.all([
         getSiteById(contact.site_id),
         getLatestSiteScanSummary(contact.site_id),
@@ -208,6 +223,7 @@ function initOutreachWorker() {
         trackedReportUrl: trackingUrls.trackedReportUrl,
         trackingPixelUrl: trackingUrls.trackingPixelUrl,
         selfScanUrl: buildReportUrl(null),
+        unsubscribeUrl: trackingUrls.unsubscribeUrl,
       });
 
       const response = await sendEmail({

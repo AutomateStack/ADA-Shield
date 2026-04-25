@@ -78,6 +78,10 @@ interface ContactEntry {
   follow_up_scheduled_for: string | null;
   last_engagement_at: string | null;
   created_at: string;
+  replied_at: string | null;
+  unsubscribed_at: string | null;
+  bounced_at: string | null;
+  complained_at: string | null;
 }
 
 interface TopLead {
@@ -515,6 +519,9 @@ export default function AdminOutreachPage() {
   const [historyStatusFilter, setHistoryStatusFilter] = useState<'all' | FollowUpStatus>('all');
   const [historySummary, setHistorySummary] = useState<FollowUpHistorySummary | null>(null);
 
+  // Reply tracking state
+  const [markingReplied, setMarkingReplied] = useState(false);
+
   // Suppressions state
   const [suppressions, setSuppressions] = useState<Suppression[]>([]);
   const [suppressionsTotal, setSuppressionsTotal] = useState(0);
@@ -659,6 +666,24 @@ export default function AdminOutreachPage() {
       addToast(err.message || 'Failed to remove suppression', 'error');
     } finally {
       setRemovingEmail(null);
+    }
+  };
+
+  const handleMarkReplied = async (contact: ContactEntry) => {
+    setMarkingReplied(true);
+    try {
+      const res = await fetch(
+        `${apiUrl}/api/admin/outreach/contacts/${contact.id}/mark-replied`,
+        { method: 'POST', headers }
+      );
+      if (!res.ok) throw new Error('Failed to mark as replied');
+      const now = new Date().toISOString();
+      setDetailModal((prev) => prev ? { ...prev, replied_at: now, follow_up_status: 'canceled' } : prev);
+      addToast(`${contact.recipient_email} marked as replied — follow-ups canceled`);
+    } catch (err: any) {
+      addToast(err.message || 'Failed to mark as replied', 'error');
+    } finally {
+      setMarkingReplied(false);
     }
   };
 
@@ -1572,6 +1597,13 @@ export default function AdminOutreachPage() {
                 <div className="mt-2 flex gap-2 flex-wrap">
                   <LeadBadge status={detailModal.lead_status} score={detailModal.lead_score} />
                   <FollowUpBadge status={detailModal.follow_up_status} />
+                  {detailModal.replied_at && (
+                    <span className="inline-flex items-center gap-1 bg-green-500/15 text-green-400 rounded px-1.5 py-0.5 text-[11px] font-medium">
+                      <CheckCircle2 className="h-3 w-3" /> Replied {formatRelativeTime(detailModal.replied_at)}
+                    </span>
+                  )}
+                  {detailModal.bounced_at && <span className="inline-flex items-center gap-1 bg-red-500/10 text-red-400 rounded px-1.5 py-0.5 text-[11px] font-medium"><XCircle className="h-3 w-3" /> Bounced</span>}
+                  {detailModal.unsubscribed_at && <span className="inline-flex items-center gap-1 bg-slate-500/10 text-slate-400 rounded px-1.5 py-0.5 text-[11px] font-medium"><XCircle className="h-3 w-3" /> Unsubscribed</span>}
                   {detailModal.delivery_status === 'failed' && <span className="inline-flex items-center gap-1 bg-red-500/10 text-red-400 rounded px-1.5 py-0.5 text-[11px] font-medium"><XCircle className="h-3 w-3" /> Delivery failed</span>}
                 </div>
               </div>
@@ -1604,6 +1636,21 @@ export default function AdminOutreachPage() {
                 <div className="text-xs text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-2"><Mail className="h-3.5 w-3.5" /> Message</div>
                 <div className="text-sm text-slate-300 whitespace-pre-wrap leading-relaxed bg-black/30 rounded-lg p-4 border border-white/5 max-h-60 overflow-y-auto">{detailModal.message}</div>
               </div>
+
+              {!detailModal.replied_at && !detailModal.unsubscribed_at && !detailModal.bounced_at && detailModal.delivery_status !== 'failed' && (
+                <div className="pt-1 border-t border-white/5">
+                  <button
+                    onClick={() => handleMarkReplied(detailModal)}
+                    disabled={markingReplied}
+                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-green-400 bg-green-500/10 border border-green-500/20 rounded-lg hover:bg-green-500/20 transition-colors disabled:opacity-50"
+                  >
+                    {markingReplied
+                      ? <><Loader2 className="h-4 w-4 animate-spin" /> Marking…</>
+                      : <><CheckCircle2 className="h-4 w-4" /> Mark as Replied</>}
+                  </button>
+                  <p className="text-[11px] text-slate-600 mt-1.5">Records a reply and cancels all pending follow-ups for this contact.</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
