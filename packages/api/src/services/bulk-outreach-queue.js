@@ -179,8 +179,7 @@ function initBulkQueue() {
   bulkQueue = new Queue(BULK_QUEUE_NAME, {
     connection,
     defaultJobOptions: {
-      attempts: 2,
-      backoff: { type: 'exponential', delay: 10000 },
+      attempts: 1,
       removeOnComplete: { count: 200 },
       removeOnFail: { count: 100 },
     },
@@ -264,8 +263,8 @@ async function processOneSite(siteId, batchId) {
   const site = await getSiteById(siteId);
   if (!site) throw new Error(`Site ${siteId} not found`);
 
-  // Runtime cooldown guard — a second layer of protection in case the same site
-  // slips through enqueuePendingBulkSites (e.g. job was queued before last_contacted_at
+  // Runtime cooldown guard — second layer of protection in case the same site
+  // slips through enqueuePendingBulkSites (e.g. job queued before last_contacted_at
   // was written, or the server restarted mid-batch and re-enqueued).
   if (site.last_contacted_at) {
     const daysSince = (Date.now() - new Date(site.last_contacted_at).getTime()) / (1000 * 60 * 60 * 24);
@@ -279,6 +278,11 @@ async function processOneSite(siteId, batchId) {
       return { siteId, skipped: true, reason: 'contacted_too_recently', daysSince: parseFloat(daysSince.toFixed(1)) };
     }
   }
+
+  // IMPORTANT: stamp last_contacted_at NOW — before scan or email — so that any
+  // BullMQ retry (e.g. if markSiteAsContacted failed after emails were already
+  // sent) is blocked by the cooldown check above and cannot send duplicate emails.
+  await markSiteAsContacted(siteId);
 
   // 1. Scan
   logger.info('Bulk: scanning site', { siteId, url: site.url });
@@ -367,6 +371,24 @@ ADA Shield
       continue;
     }
 
+    // Final dedup guard: check contact history for a recent sent email to this
+    // recipient. Catches the case where last_contacted_at was just stamped but a
+    // previous attempt already sent the email before failing on something else.
+    const cooldownThreshold = new Date(Date.now() - MIN_DAYS_BETWEEN_OUTREACH * 24 * 60 * 60 * 1000).toISOString();
+    const { data: recentEntry } = await supabase
+      .from('site_contact_history')
+      .select('id')
+      .eq('site_id', siteId)
+      .eq('recipient_email', recipient)
+      .eq('delivery_status', 'sent')
+      .gt('created_at', cooldownThreshold)
+      .limit(1)
+      .maybeSingle();
+    if (recentEntry) {
+      logger.warn('Bulk: skipping recipient — already contacted within cooldown window', { siteId, recipient });
+      continue;
+    }
+
     const trackingToken = crypto.randomUUID();
     const trackingUrls = buildTrackingUrls(trackingToken, reportUrl);
     const trackedText = injectTrackedLink(
@@ -449,11 +471,6 @@ ADA Shield
 
     sentRecipients.push(recipient);
     logger.info('Bulk: email sent', { siteId, recipient });
-  }
-
-  // Keep Sites admin counts aligned with manual send flow.
-  if (sentRecipients.length > 0) {
-    await markSiteAsContacted(site.id);
   }
 
   return { siteId, scanned: true, emailed: sentRecipients.length > 0, recipients: sentRecipients };
