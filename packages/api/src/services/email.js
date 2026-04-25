@@ -514,11 +514,140 @@ async function sendEmail({ to, subject, text, html, cc, from = EMAIL_FROM }) {
   }
 }
 
+/**
+ * Sends the daily outreach digest email to the configured admin address.
+ */
+async function sendDigestEmail({
+  to,
+  stats,
+  periodLabel = 'Last 24 Hours',
+}) {
+  const resend = getResendClient();
+  if (!resend) {
+    logger.warn('RESEND_API_KEY not configured — skipping digest email');
+    return null;
+  }
+
+  const {
+    sentCount = 0,
+    openedCount = 0,
+    clickedCount = 0,
+    openRate = 0,
+    clickRate = 0,
+    hotLeadCount = 0,
+    repliesCount = 0,
+    followUpsSentCount = 0,
+    pendingFollowUps = 0,
+    newSuppressionsCount = 0,
+    newSuppressions = [],
+  } = stats || {};
+
+  const suppressionRows = newSuppressions.length
+    ? newSuppressions
+        .map(
+          (s) =>
+            `<tr><td style="padding:8px 12px;color:#94a3b8;">${escapeHtml(s.email)}</td><td style="padding:8px 12px;color:#64748b;">${escapeHtml(s.reason)}</td></tr>`
+        )
+        .join('')
+    : `<tr><td colspan="2" style="padding:8px 12px;color:#475569;text-align:center;">None</td></tr>`;
+
+  const safeDate = sanitizeSubject(new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }));
+
+  try {
+    const { data, error } = await resend.emails.send({
+      from: getVerifiedFromAddress(EMAIL_FROM),
+      to,
+      subject: `📬 ADA Shield Daily Digest — ${safeDate}`,
+      html: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Daily Outreach Digest</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0f172a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    .wrapper { background: #0f172a; padding: 40px 20px; }
+    .container { max-width: 600px; margin: 0 auto; }
+    .header { text-align: center; margin-bottom: 28px; }
+    .header h1 { color: #818cf8; font-size: 26px; }
+    .card { background: #1e293b; border-radius: 12px; padding: 32px; border: 1px solid rgba(255,255,255,0.08); margin-bottom: 20px; }
+    .card h2 { color: #fff; font-size: 18px; margin-bottom: 20px; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .stat { background: #0f172a; border-radius: 8px; padding: 16px; text-align: center; }
+    .stat .num { font-size: 32px; font-weight: bold; color: #6366f1; display: block; }
+    .stat .lbl { font-size: 12px; color: #64748b; margin-top: 4px; }
+    .stat.green .num { color: #22c55e; }
+    .stat.amber .num { color: #f59e0b; }
+    .stat.red .num { color: #ef4444; }
+    .divider { border: none; border-top: 1px solid rgba(255,255,255,0.06); margin: 20px 0; }
+    .suppression-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    .suppression-table th { text-align: left; padding: 8px 12px; color: #475569; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.06); }
+    .footer { color: #334155; font-size: 12px; text-align: center; margin-top: 24px; }
+  </style>
+</head>
+<body>
+<div class="wrapper">
+  <div class="container">
+    <div class="header">
+      <h1>🛡️ ADA Shield</h1>
+      <p style="color:#64748b;margin-top:6px;font-size:14px;">Daily Outreach Digest &mdash; ${escapeHtml(periodLabel)}</p>
+    </div>
+
+    <div class="card">
+      <h2>📤 Emails Sent</h2>
+      <div class="grid">
+        <div class="stat"><span class="num">${sentCount}</span><span class="lbl">Sent</span></div>
+        <div class="stat green"><span class="num">${openedCount}</span><span class="lbl">Opened (${openRate}%)</span></div>
+        <div class="stat amber"><span class="num">${clickedCount}</span><span class="lbl">Clicked (${clickRate}%)</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>🔥 Engagement</h2>
+      <div class="grid">
+        <div class="stat green"><span class="num">${hotLeadCount}</span><span class="lbl">Hot Leads</span></div>
+        <div class="stat green"><span class="num">${repliesCount}</span><span class="lbl">Replies</span></div>
+        <div class="stat amber"><span class="num">${followUpsSentCount}</span><span class="lbl">Follow-ups Sent</span></div>
+      </div>
+      <hr class="divider">
+      <div class="grid" style="grid-template-columns:repeat(2,1fr);">
+        <div class="stat"><span class="num">${pendingFollowUps}</span><span class="lbl">Pending Follow-ups</span></div>
+        <div class="stat red"><span class="num">${newSuppressionsCount}</span><span class="lbl">New Suppressions</span></div>
+      </div>
+    </div>
+
+    ${newSuppressionsCount > 0 ? `
+    <div class="card">
+      <h2>🚫 New Suppressions</h2>
+      <table class="suppression-table">
+        <thead><tr><th>Email</th><th>Reason</th></tr></thead>
+        <tbody>${suppressionRows}</tbody>
+      </table>
+    </div>` : ''}
+
+    <div class="footer">ADA Shield &mdash; Admin Digest</div>
+  </div>
+</div>
+</body>
+</html>`,
+    });
+
+    if (error) throw new Error(error.message ?? String(error));
+    logger.info('Digest email sent', { to, messageId: data?.id });
+    return { messageId: data?.id };
+  } catch (err) {
+    logger.error('Failed to send digest email', { to, error: err.message });
+    return null;
+  }
+}
+
 module.exports = {
   sendScanCompleteEmail,
   sendRiskAlertEmail,
   sendWeeklySummaryEmail,
   sendEmail,
+  sendDigestEmail,
   getVerifiedFromAddress,
   detectIndustry,
   getIndustryContext,

@@ -248,6 +248,8 @@ const adminSitePatchSchema = z.object({
   owner_name: z.string().trim().max(120).nullable().optional(),
   owner_email: z.string().trim().max(1000).nullable().optional(),
   notification_recipients: z.string().trim().max(4000).optional().nullable(),
+  notes: z.string().trim().max(2000).nullable().optional(),
+  outreach_paused: z.boolean().optional(),
 });
 
 function parseEmailList(value) {
@@ -296,6 +298,14 @@ router.patch('/sites/:siteId', async (req, res, next) => {
     if (parsed.data.notification_recipients !== undefined || parsed.data.owner_email !== undefined) {
       const mergedRecipients = [...new Set([...ownerEmails.slice(1), ...extraEmails])];
       patch.notification_recipients = mergedRecipients;
+    }
+
+    if (parsed.data.notes !== undefined) {
+      patch.notes = parsed.data.notes === '' ? null : parsed.data.notes;
+    }
+
+    if (parsed.data.outreach_paused !== undefined) {
+      patch.outreach_paused = parsed.data.outreach_paused;
     }
 
     if (Object.keys(patch).length === 0) {

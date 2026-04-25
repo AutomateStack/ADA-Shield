@@ -145,6 +145,7 @@ async function enqueuePendingBulkSites(limit) {
     .from('sites')
     .select('id')
     .eq('import_source', 'excel_bulk_import')
+    .eq('outreach_paused', false)
     .or(`last_contacted_at.is.null,last_contacted_at.lt.${threshold}`)
     .not('owner_email', 'is', null)
     .order('created_at', { ascending: true })

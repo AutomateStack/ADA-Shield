@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, ChevronLeft, ChevronRight, Save, Globe, Send, X } from 'lucide-react';
+import { RefreshCw, ChevronLeft, ChevronRight, Save, Globe, Send, X, PauseCircle, PlayCircle } from 'lucide-react';
 
 // Simple relative time formatter
 const formatRelativeTime = (dateString: string | null): string => {
@@ -36,6 +36,8 @@ interface AdminSite {
   last_contacted_at: string | null;
   latest_risk_score: number | null;
   latest_scanned_at: string | null;
+  notes: string | null;
+  outreach_paused: boolean;
 }
 
 interface SitesResponse {
@@ -47,6 +49,7 @@ interface SitesResponse {
 
 interface DraftRow {
   owner_email: string;
+  notes: string;
 }
 
 interface EmailModal {
@@ -120,6 +123,7 @@ export default function AdminSitesPage() {
   const [error, setError] = useState('');
   const [drafts, setDrafts] = useState<Record<string, DraftRow>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
+  const [pausing, setPausing] = useState<Record<string, boolean>>({});
   const [emailModal, setEmailModal] = useState<EmailModal | null>(null);
   const [emailSending, setEmailSending] = useState(false);
   const [emailTemplateLoading, setEmailTemplateLoading] = useState(false);
@@ -176,6 +180,7 @@ export default function AdminSitesPage() {
       for (const site of payload.sites) {
         nextDrafts[site.id] = {
           owner_email: [site.owner_email, ...(site.notification_recipients || [])].filter(Boolean).join(', '),
+          notes: site.notes || '',
         };
       }
       setDrafts(nextDrafts);
@@ -204,12 +209,30 @@ export default function AdminSitesPage() {
     setDrafts((prev) => ({
       ...prev,
       [siteId]: {
-        ...(prev[siteId] || {
-          owner_email: '',
-        }),
+        ...(prev[siteId] || { owner_email: '', notes: '' }),
         [key]: value,
       },
     }));
+  };
+
+  const togglePause = async (site: AdminSite) => {
+    setPausing((prev) => ({ ...prev, [site.id]: true }));
+    try {
+      const res = await fetch(`${apiUrl}/api/admin/sites/${site.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret },
+        body: JSON.stringify({ outreach_paused: !site.outreach_paused }),
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload.error || 'Failed to update pause status');
+      }
+      await fetchSites();
+    } catch (err: any) {
+      alert(err.message || 'Failed to update pause status');
+    } finally {
+      setPausing((prev) => ({ ...prev, [site.id]: false }));
+    }
   };
 
   const saveSite = async (siteId: string) => {
@@ -541,9 +564,7 @@ export default function AdminSitesPage() {
                 </tr>
               ) : (
                 data.sites.map((site) => {
-                  const draft = drafts[site.id] || {
-                    owner_email: '',
-                  };
+                  const draft = drafts[site.id] || { owner_email: '', notes: '' };
 
                   const hasRecipients = Boolean(draft.owner_email.trim());
 
@@ -598,9 +619,13 @@ export default function AdminSitesPage() {
                             placeholder="Emails (comma-separated): owner@company.com, ops@company.com"
                             className="w-full px-2.5 py-1.5 rounded-md bg-white/5 border border-white/10 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500"
                           />
-                          <p className="text-[11px] text-slate-500">
-                            Add all site emails here separated by commas.
-                          </p>
+                          <textarea
+                            value={draft.notes}
+                            onChange={(e) => updateDraft(site.id, 'notes', e.target.value)}
+                            placeholder="Notes (call log, context, follow-up reminders...)"
+                            rows={2}
+                            className="w-full px-2.5 py-1.5 rounded-md bg-white/5 border border-white/10 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none text-xs"
+                          />
                         </div>
                       </td>
                       <td className="px-4 py-3 text-center">
@@ -625,6 +650,25 @@ export default function AdminSitesPage() {
                         >
                           <Send className="h-3.5 w-3.5" />
                           Email
+                        </button>
+                        <button
+                          onClick={() => togglePause(site)}
+                          disabled={!!pausing[site.id]}
+                          title={site.outreach_paused ? 'Resume outreach' : 'Pause outreach'}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-md transition-colors disabled:opacity-60 ${
+                            site.outreach_paused
+                              ? 'text-amber-300 hover:text-white bg-amber-600/10 hover:bg-amber-600/30 border-amber-500/30'
+                              : 'text-slate-300 hover:text-white bg-slate-600/10 hover:bg-slate-600/30 border-slate-500/30'
+                          }`}
+                        >
+                          {pausing[site.id] ? (
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                          ) : site.outreach_paused ? (
+                            <PlayCircle className="h-3.5 w-3.5" />
+                          ) : (
+                            <PauseCircle className="h-3.5 w-3.5" />
+                          )}
+                          {site.outreach_paused ? 'Resume' : 'Pause'}
                         </button>
                         <button
                           onClick={() => saveSite(site.id)}
