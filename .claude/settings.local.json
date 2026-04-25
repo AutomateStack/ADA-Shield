@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --check packages/api/src/services/outreach-queue.js)",
+      "Bash(node --check packages/api/src/routes/admin.js)"
+    ]
+  }
+}

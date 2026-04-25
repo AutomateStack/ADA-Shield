@@ -25,12 +25,13 @@ const {
   getScheduledFollowUps,
   getFollowUpHistory,
   getFollowUpDueSites,
+  getSiteContactHistoryEntryById,
 } = require('../db/admin');
 const { saveScanResult, updateSiteLastScanned } = require('../db/scans');
 const { createOrUpdateFreeScanSite } = require('../db/sites');
 const { invokeSupabaseFunction } = require('../services/supabase-functions');
 const { sendEmail, detectIndustry, getIndustryContext } = require('../services/email');
-const { scheduleFollowUp } = require('../services/outreach-queue');
+const { scheduleFollowUp, cancelFollowUp } = require('../services/outreach-queue');
 const {
   buildTrackingUrls,
   buildTrackedEmailHtml,
@@ -1242,7 +1243,44 @@ router.delete('/blog/:id', async (req, res, next) => {
   }
 });
 
-// ── Email Suppressions ──────────────────────────────────���───────────
+// ── Reply Tracking ─────────────────────────────────────────────────
+
+router.post('/outreach/contacts/:contactId/mark-replied', adminAuth, async (req, res, next) => {
+  try {
+    const { contactId } = req.params;
+    const contact = await getSiteContactHistoryEntryById(contactId);
+    if (!contact) return res.status(404).json({ error: 'Contact not found' });
+
+    if (contact.replied_at) {
+      return res.json({ alreadyReplied: true, replied_at: contact.replied_at });
+    }
+
+    const now = new Date().toISOString();
+
+    await updateSiteContactHistoryEntry(contactId, {
+      replied_at: now,
+      follow_up_status: 'canceled',
+    });
+
+    // Cancel any pending follow-up jobs for this contact
+    const rules = ['no_open', 'opened_no_click', 'opened_repeat', 'clicked_report'];
+    await Promise.allSettled(rules.map((rule) => cancelFollowUp(contactId, rule)));
+
+    await createSiteContactEvent({
+      siteId: contact.site_id,
+      contactHistoryId: contactId,
+      eventType: 'reply',
+      metadata: { marked_manually: true, marked_at: now },
+    });
+
+    logger.info('Contact marked as replied', { contactId, recipient: contact.recipient_email });
+    return res.json({ marked: true, replied_at: now });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Email Suppressions ─────────────────────────────────────────────
 
 router.get('/suppressions', adminAuth, async (req, res, next) => {
   try {
