@@ -21,6 +21,7 @@ const { createRateLimiter } = require('./middleware/rate-limiter');
 const { initScanQueue, initScanWorker } = require('./services/scan-queue');
 const { initOutreachQueue, initOutreachWorker } = require('./services/outreach-queue');
 const { initBulkQueue, initBulkWorker, scheduleDailyTrigger } = require('./services/bulk-outreach-queue');
+const { initDigestQueue, initDigestWorker, scheduleDailyDigest } = require('./services/digest-queue');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -110,6 +111,11 @@ app.listen(PORT, () => {
   initBulkWorker();
   scheduleDailyTrigger().catch((err) =>
     logger.warn('Could not schedule daily bulk trigger', { error: err?.message })
+  );
+  initDigestQueue();
+  initDigestWorker();
+  scheduleDailyDigest().catch((err) =>
+    logger.warn('Could not schedule daily digest', { error: err?.message })
   );
 });
 

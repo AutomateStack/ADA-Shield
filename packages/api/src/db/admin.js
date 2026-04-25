@@ -337,7 +337,7 @@ async function getAdminSites({
     let query = supabase
       .from('sites')
       .select(
-        'id, user_id, url, name, created_at, owner_name, owner_email, notification_recipients, contacted_count, last_contacted_at, type',
+        'id, user_id, url, name, created_at, owner_name, owner_email, notification_recipients, contacted_count, last_contacted_at, type, notes, outreach_paused',
         { count: 'exact' }
       );
 
@@ -454,7 +454,7 @@ async function updateAdminSiteMetadata(siteId, patch) {
       .update(patch)
       .eq('id', siteId)
       .select(
-        'id, user_id, url, name, created_at, owner_name, owner_email, notification_recipients, contacted_count, last_contacted_at, type'
+        'id, user_id, url, name, created_at, owner_name, owner_email, notification_recipients, contacted_count, last_contacted_at, type, notes, outreach_paused'
       )
       .single();
 
@@ -474,7 +474,7 @@ async function getSiteById(siteId) {
   try {
     const { data, error } = await supabase
       .from('sites')
-      .select('id, url, name, owner_name, owner_email, notification_recipients, user_id, created_at, contacted_count, last_contacted_at, type')
+      .select('id, url, name, owner_name, owner_email, notification_recipients, user_id, created_at, contacted_count, last_contacted_at, type, notes, outreach_paused')
       .eq('id', siteId)
       .single();
 
@@ -1206,6 +1206,76 @@ async function getFollowUpDueSites({ minDays = 10, limit = 100 } = {}) {
   }
 }
 
+async function getOutreachDigestStats(since) {
+  const sinceIso = since instanceof Date ? since.toISOString() : since;
+
+  const [
+    { data: sent },
+    { data: hotLeads },
+    { data: replies },
+    { data: followUpsSent },
+    { data: newSuppressions },
+    { count: pendingFollowUps },
+  ] = await Promise.all([
+    // Emails sent since cutoff
+    supabase
+      .from('site_contact_history')
+      .select('id, opens_count, clicks_count, lead_status')
+      .gte('created_at', sinceIso)
+      .eq('delivery_status', 'sent'),
+
+    // Current hot leads (all time — just a snapshot count)
+    supabase
+      .from('site_contact_history')
+      .select('id', { count: 'exact', head: true })
+      .eq('lead_status', 'hot'),
+
+    // Replies recorded since cutoff
+    supabase
+      .from('site_contact_history')
+      .select('id, recipient_email')
+      .gte('replied_at', sinceIso)
+      .not('replied_at', 'is', null),
+
+    // Follow-up events since cutoff
+    supabase
+      .from('site_contact_events')
+      .select('id')
+      .eq('event_type', 'follow_up_sent')
+      .gte('created_at', sinceIso),
+
+    // New suppressions since cutoff
+    supabase
+      .from('email_suppressions')
+      .select('email, reason')
+      .gte('created_at', sinceIso),
+
+    // Pending (scheduled) follow-ups — snapshot
+    supabase
+      .from('site_contact_history')
+      .select('id', { count: 'exact', head: true })
+      .eq('follow_up_status', 'scheduled'),
+  ]);
+
+  const sentList = sent || [];
+  const openedCount = sentList.filter((r) => r.opens_count > 0).length;
+  const clickedCount = sentList.filter((r) => r.clicks_count > 0).length;
+
+  return {
+    sentCount: sentList.length,
+    openedCount,
+    clickedCount,
+    openRate: sentList.length > 0 ? Math.round((openedCount / sentList.length) * 100) : 0,
+    clickRate: sentList.length > 0 ? Math.round((clickedCount / sentList.length) * 100) : 0,
+    hotLeadCount: hotLeads?.length ?? 0,
+    repliesCount: (replies || []).length,
+    followUpsSentCount: (followUpsSent || []).length,
+    pendingFollowUps: pendingFollowUps || 0,
+    newSuppressionsCount: (newSuppressions || []).length,
+    newSuppressions: (newSuppressions || []).slice(0, 5),
+  };
+}
+
 module.exports = {
   getAdminStats,
   getAdminScans,
@@ -1232,4 +1302,5 @@ module.exports = {
   getScheduledFollowUps,
   getFollowUpHistory,
   getFollowUpDueSites,
+  getOutreachDigestStats,
 };
