@@ -8,7 +8,7 @@ const helmet = require('helmet');
 const { logger } = require('./utils/logger');
 const { validateConfig } = require('./utils/config');
 const { scanRoutes } = require('./routes/scan');
-const { webhookRoutes, gumroadWebhookRoutes } = require('./routes/webhooks');
+const { webhookRoutes, gumroadWebhookRoutes, resendWebhookRoutes } = require('./routes/webhooks');
 const { internalRoutes } = require('./routes/internal');
 const { billingRoutes } = require('./routes/billing');
 const { notificationRoutes } = require('./routes/notifications');
@@ -37,6 +37,8 @@ app.use((req, _res, next) => {
 app.use('/api/webhooks/stripe', webhookRoutes);
 // Gumroad sends urlencoded body — mount before json parser too
 app.use('/api/webhooks/gumroad', gumroadWebhookRoutes);
+// Resend webhooks use JSON body — mount before global json parser to use its own limit
+app.use('/api/webhooks/resend', resendWebhookRoutes);
 
 app.use(helmet());
 

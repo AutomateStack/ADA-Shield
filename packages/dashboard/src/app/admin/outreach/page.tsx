@@ -23,6 +23,8 @@ import {
   ArrowRight,
   Loader2,
   ChevronRight,
+  ShieldOff,
+  Trash2,
 } from 'lucide-react';
 
 // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -57,7 +59,7 @@ const formatDate = (dateString: string | null): string => {
 type LeadStatus = 'cold' | 'warm' | 'hot';
 type FollowUpStatus = 'none' | 'scheduled' | 'sent' | 'skipped' | 'canceled';
 type EventType = 'sent' | 'open' | 'click' | 'follow_up_scheduled' | 'follow_up_sent' | 'follow_up_canceled' | string;
-type Tab = 'overview' | 'clicks' | 'followup' | 'history';
+type Tab = 'overview' | 'clicks' | 'followup' | 'history' | 'suppressions';
 
 interface ContactEntry {
   id: string;
@@ -213,6 +215,14 @@ interface FollowUpHistorySummary {
   scheduled: number;
   skipped: number;
   canceled: number;
+}
+
+interface Suppression {
+  email: string;
+  reason: 'unsubscribe' | 'hard_bounce' | 'spam_complaint' | 'manual' | 'invalid_address';
+  source_contact_history_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
 }
 
 interface ScheduledFollowUp {
@@ -505,6 +515,14 @@ export default function AdminOutreachPage() {
   const [historyStatusFilter, setHistoryStatusFilter] = useState<'all' | FollowUpStatus>('all');
   const [historySummary, setHistorySummary] = useState<FollowUpHistorySummary | null>(null);
 
+  // Suppressions state
+  const [suppressions, setSuppressions] = useState<Suppression[]>([]);
+  const [suppressionsTotal, setSuppressionsTotal] = useState(0);
+  const [suppressionsLoading, setSuppressionsLoading] = useState(false);
+  const [suppressionsError, setSuppressionsError] = useState('');
+  const [suppressionsLoaded, setSuppressionsLoaded] = useState(false);
+  const [removingEmail, setRemovingEmail] = useState<string | null>(null);
+
   // UI controls & filters
   const [leadsSearch, setLeadsSearch] = useState('');
   const [followUpMinDays, setFollowUpMinDays] = useState(10);
@@ -608,6 +626,42 @@ export default function AdminOutreachPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiUrl, adminSecret]);
 
+  const fetchSuppressions = useCallback(async () => {
+    setSuppressionsLoading(true);
+    setSuppressionsError('');
+    try {
+      const res = await fetch(`${apiUrl}/api/admin/suppressions?limit=100`, { headers });
+      if (!res.ok) throw new Error('Failed to fetch suppressions');
+      const data = await res.json();
+      setSuppressions(data.suppressions || []);
+      setSuppressionsTotal(data.total || 0);
+      setSuppressionsLoaded(true);
+    } catch (err: any) {
+      setSuppressionsError(err.message || 'Failed to load suppressions');
+    } finally {
+      setSuppressionsLoading(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiUrl, adminSecret]);
+
+  const handleRemoveSuppression = async (email: string) => {
+    setRemovingEmail(email);
+    try {
+      const res = await fetch(`${apiUrl}/api/admin/suppressions/${encodeURIComponent(email)}`, {
+        method: 'DELETE',
+        headers,
+      });
+      if (!res.ok) throw new Error('Failed to remove suppression');
+      setSuppressions((prev) => prev.filter((s) => s.email !== email));
+      setSuppressionsTotal((prev) => Math.max(0, prev - 1));
+      addToast(`${email} removed from suppression list`);
+    } catch (err: any) {
+      addToast(err.message || 'Failed to remove suppression', 'error');
+    } finally {
+      setRemovingEmail(null);
+    }
+  };
+
   // Load overview on mount; load other tabs lazily when first visited
   useEffect(() => { fetchOverview(); }, [fetchOverview]);
 
@@ -616,6 +670,7 @@ export default function AdminOutreachPage() {
     if (activeTab === 'followup' && followUpSites.length === 0 && !followUpLoading) fetchFollowUpQueue();
     if (activeTab === 'followup' && !scheduledLoaded && !scheduledLoading) fetchScheduled();
     if (activeTab === 'history' && !historyLoaded && !historyLoading) fetchFollowUpHistory();
+    if (activeTab === 'suppressions' && !suppressionsLoaded && !suppressionsLoading) fetchSuppressions();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
@@ -645,10 +700,12 @@ export default function AdminOutreachPage() {
   const currentRefresh = activeTab === 'overview' ? fetchOverview
     : activeTab === 'clicks' ? fetchClickAnalytics
     : activeTab === 'history' ? fetchFollowUpHistory
+    : activeTab === 'suppressions' ? fetchSuppressions
     : () => { fetchFollowUpQueue(); fetchScheduled(); };
   const isLoading = activeTab === 'overview' ? overviewLoading
     : activeTab === 'clicks' ? clickLoading
     : activeTab === 'history' ? historyLoading
+    : activeTab === 'suppressions' ? suppressionsLoading
     : followUpLoading || scheduledLoading;
 
   const TABS: Array<{ key: Tab; label: string; icon: React.ElementType; count?: number }> = [
@@ -656,6 +713,7 @@ export default function AdminOutreachPage() {
     { key: 'clicks', label: 'Click Analysis', icon: MousePointerClick, count: clickData?.funnel.clicked },
     { key: 'followup', label: 'Follow-up Queue', icon: RotateCcw, count: (followUpSites.filter(s => s.hasEmail && !sentSiteIds.has(s.siteId)).length + scheduledItems.filter(s => s.overdue).length) || undefined },
     { key: 'history', label: 'Follow-up History', icon: ArrowRight, count: historySummary?.sent || undefined },
+    { key: 'suppressions', label: 'Suppressions', icon: ShieldOff, count: suppressionsTotal || undefined },
   ];
 
   // ── Derived / filtered data ────────────────────────────────────────────────
@@ -1430,6 +1488,77 @@ export default function AdminOutreachPage() {
                 );
               })()}
             </>
+          )}
+        </>
+      )}
+
+      {/* ── SUPPRESSIONS TAB ──────────────────────────────────────────────── */}
+      {activeTab === 'suppressions' && (
+        <>
+          {suppressionsError && (
+            <div className="flex items-center gap-3 p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-300 text-sm">
+              <AlertCircle className="h-4 w-4 flex-shrink-0" />{suppressionsError}
+            </div>
+          )}
+          {suppressionsLoading && !suppressionsLoaded && (
+            <div className="flex items-center justify-center py-16 text-slate-400">
+              <RefreshCw className="h-5 w-5 animate-spin mr-2" />Loading suppressions…
+            </div>
+          )}
+          {suppressionsLoaded && (
+            <div className="rounded-xl border border-white/10 bg-white/5 overflow-hidden">
+              <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
+                <div>
+                  <h2 className="text-sm font-semibold text-white">Email Suppression List</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Emails that will never receive outreach — unsubscribes, hard bounces, and spam complaints.
+                  </p>
+                </div>
+                {suppressionsTotal > 0 && (
+                  <span className="text-xs text-slate-500 bg-white/5 px-2 py-1 rounded-full">{suppressionsTotal} suppressed</span>
+                )}
+              </div>
+              {suppressions.length === 0 ? (
+                <div className="px-5 py-12 text-center">
+                  <ShieldOff className="h-8 w-8 text-slate-600 mx-auto mb-3" />
+                  <p className="text-slate-400 text-sm font-medium">No suppressed emails</p>
+                  <p className="text-slate-600 text-xs mt-1">Unsubscribes, bounces, and spam complaints will appear here.</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-white/5">
+                  {suppressions.map((s) => {
+                    const reasonCfg =
+                      s.reason === 'unsubscribe' ? { bg: 'bg-slate-500/10', text: 'text-slate-300', label: 'Unsubscribed' }
+                      : s.reason === 'hard_bounce' ? { bg: 'bg-red-500/10', text: 'text-red-400', label: 'Hard bounce' }
+                      : s.reason === 'spam_complaint' ? { bg: 'bg-orange-500/10', text: 'text-orange-400', label: 'Spam complaint' }
+                      : s.reason === 'manual' ? { bg: 'bg-purple-500/10', text: 'text-purple-400', label: 'Manual' }
+                      : { bg: 'bg-yellow-500/10', text: 'text-yellow-400', label: 'Invalid address' };
+                    const isRemoving = removingEmail === s.email;
+                    return (
+                      <div key={s.email} className="flex items-center gap-4 px-5 py-3.5 hover:bg-white/[0.03] transition-colors">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm text-slate-200 font-medium truncate">{s.email}</span>
+                            <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium ${reasonCfg.bg} ${reasonCfg.text}`}>
+                              {reasonCfg.label}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-600 mt-0.5">Suppressed {formatDate(s.created_at)}</div>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveSuppression(s.email)}
+                          disabled={isRemoving}
+                          title="Remove from suppression list"
+                          className="flex-shrink-0 p-1.5 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-40"
+                        >
+                          {isRemoving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           )}
         </>
       )}

@@ -265,4 +265,90 @@ gumroadRouter.post('/', async (req, res) => {
   }
 });
 
-module.exports = { webhookRoutes, gumroadWebhookRoutes: gumroadRouter };
+// ════════════════════════════════════════════════════════════════════════
+// Resend Webhook Handler
+// POST /api/webhooks/resend?token=<RESEND_WEBHOOK_SECRET>
+// Handles bounce and spam complaint events from Resend.
+// ════════════════════════════════════════════════════════════════════════
+
+const { addEmailSuppression, getSiteContactHistoryByProviderMessageId } = require('../db/suppressions');
+const adminDb = require('../db/admin');
+
+const resendRouter = Router();
+resendRouter.use(express.json({ limit: '256kb' }));
+
+resendRouter.post('/', async (req, res) => {
+  const expectedToken = process.env.RESEND_WEBHOOK_SECRET;
+  if (expectedToken && req.query.token !== expectedToken) {
+    logger.warn('Resend webhook: invalid token');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const { type, data } = req.body || {};
+  if (!type || !data) {
+    return res.status(400).json({ error: 'Missing type or data' });
+  }
+
+  try {
+    if (type === 'email.bounced') {
+      const recipient = Array.isArray(data.to) ? data.to[0] : data.to;
+      if (recipient) {
+        const contact = data.email_id
+          ? await getSiteContactHistoryByProviderMessageId(data.email_id)
+          : null;
+
+        await addEmailSuppression({
+          email: recipient,
+          reason: 'hard_bounce',
+          sourceContactHistoryId: contact?.id || null,
+          metadata: { email_id: data.email_id, bounce_message: data.bounce?.message || null },
+        });
+
+        if (contact) {
+          await adminDb.updateSiteContactHistoryEntry(contact.id, { bounced_at: new Date().toISOString() });
+          await adminDb.createSiteContactEvent({
+            siteId: contact.site_id,
+            contactHistoryId: contact.id,
+            eventType: 'bounce',
+            metadata: { email_id: data.email_id },
+          });
+        }
+        logger.info('Resend bounce processed', { recipient, email_id: data.email_id });
+      }
+    } else if (type === 'email.complained') {
+      const recipient = Array.isArray(data.to) ? data.to[0] : data.to;
+      if (recipient) {
+        const contact = data.email_id
+          ? await getSiteContactHistoryByProviderMessageId(data.email_id)
+          : null;
+
+        await addEmailSuppression({
+          email: recipient,
+          reason: 'spam_complaint',
+          sourceContactHistoryId: contact?.id || null,
+          metadata: { email_id: data.email_id },
+        });
+
+        if (contact) {
+          await adminDb.updateSiteContactHistoryEntry(contact.id, { complained_at: new Date().toISOString() });
+          await adminDb.createSiteContactEvent({
+            siteId: contact.site_id,
+            contactHistoryId: contact.id,
+            eventType: 'spam_complaint',
+            metadata: { email_id: data.email_id },
+          });
+        }
+        logger.info('Resend complaint processed', { recipient, email_id: data.email_id });
+      }
+    } else {
+      logger.info('Resend webhook: unhandled event type', { type });
+    }
+
+    return res.json({ received: true });
+  } catch (error) {
+    logger.error('Resend webhook handler error', { type, error: error.message });
+    return res.status(500).json({ error: 'Webhook handler failed' });
+  }
+});
+
+module.exports = { webhookRoutes, gumroadWebhookRoutes: gumroadRouter, resendWebhookRoutes: resendRouter };
