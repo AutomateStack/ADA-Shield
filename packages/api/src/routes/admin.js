@@ -37,6 +37,7 @@ const {
   injectTrackedLink,
   buildReportUrl,
 } = require('../services/outreach-tracking');
+const { isEmailSuppressed, getEmailSuppressions, removeEmailSuppression } = require('../db/suppressions');
 
 const router = Router();
 
@@ -760,6 +761,13 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
 
     for (let index = 0; index < toList.length; index += 1) {
       const recipient = toList[index];
+
+      if (await isEmailSuppressed(recipient)) {
+        logger.info('Admin send: skipping suppressed recipient', { siteId: site.id, recipient });
+        failures.push({ recipient, message: 'Email is on suppression list (unsubscribed, bounced, or spam complaint)' });
+        continue;
+      }
+
       const trackingToken = crypto.randomUUID();
       const trackingUrls = buildTrackingUrls(trackingToken, reportUrl, {
         apiBaseUrl: apiOrigin,
@@ -778,6 +786,7 @@ router.post('/sites/:siteId/send-email', async (req, res, next) => {
         selfScanUrl: buildReportUrl(null, {
           dashboardBaseUrl: dashboardOrigin,
         }),
+        unsubscribeUrl: trackingUrls.unsubscribeUrl,
       });
 
       const contactEntry = await createSiteContactHistoryEntry({
@@ -1041,6 +1050,13 @@ router.post('/sites/:siteId/send-followup', async (req, res, next) => {
 
     for (let index = 0; index < toList.length; index += 1) {
       const recipient = toList[index];
+
+      if (await isEmailSuppressed(recipient)) {
+        logger.info('Admin follow-up: skipping suppressed recipient', { siteId: site.id, recipient });
+        failures.push({ recipient, message: 'Email is on suppression list' });
+        continue;
+      }
+
       const trackingToken = crypto.randomUUID();
       const trackingUrls = buildTrackingUrls(trackingToken, reportUrl, { apiBaseUrl: apiOrigin });
       const trackedText = injectTrackedLink(
@@ -1055,6 +1071,7 @@ router.post('/sites/:siteId/send-followup', async (req, res, next) => {
         trackedReportUrl: trackingUrls.trackedReportUrl,
         trackingPixelUrl: trackingUrls.trackingPixelUrl,
         selfScanUrl: buildReportUrl(null, { dashboardBaseUrl: dashboardOrigin }),
+        unsubscribeUrl: trackingUrls.unsubscribeUrl,
       });
 
       const contactEntry = await createSiteContactHistoryEntry({
@@ -1220,6 +1237,30 @@ router.delete('/blog/:id', async (req, res, next) => {
       .eq('id', req.params.id);
     if (error) throw error;
     return res.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Email Suppressions ──────────────────────────────────���───────────
+
+router.get('/suppressions', adminAuth, async (req, res, next) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page || '1', 10));
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '50', 10)));
+    const result = await getEmailSuppressions({ page, limit });
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/suppressions/:email', adminAuth, async (req, res, next) => {
+  try {
+    const email = decodeURIComponent(req.params.email || '').trim();
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+    await removeEmailSuppression(email);
+    return res.json({ removed: true, email });
   } catch (error) {
     next(error);
   }

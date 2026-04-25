@@ -36,6 +36,7 @@ const {
   buildTrackedEmailHtml,
   injectTrackedLink,
 } = require('./outreach-tracking');
+const { isEmailSuppressed } = require('../db/suppressions');
 const { logger } = require('../utils/logger');
 
 const BULK_QUEUE_NAME = 'bulk-outreach';
@@ -358,6 +359,13 @@ ADA Shield
 
   for (let idx = 0; idx < recipients.length; idx++) {
     const recipient = recipients[idx];
+
+    const suppressed = await isEmailSuppressed(recipient);
+    if (suppressed) {
+      logger.info('Bulk: skipping suppressed recipient', { siteId, recipient });
+      continue;
+    }
+
     const trackingToken = crypto.randomUUID();
     const trackingUrls = buildTrackingUrls(trackingToken, reportUrl);
     const trackedText = injectTrackedLink(
@@ -372,6 +380,7 @@ ADA Shield
       trackedReportUrl: trackingUrls.trackedReportUrl,
       trackingPixelUrl: trackingUrls.trackingPixelUrl,
       selfScanUrl: buildReportUrl(null),
+      unsubscribeUrl: trackingUrls.unsubscribeUrl,
     });
 
     const contactEntry = await createSiteContactHistoryEntry({

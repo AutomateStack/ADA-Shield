@@ -83,7 +83,13 @@ function buildTrackingUrls(trackingToken, reportUrl, options = {}) {
     reportUrl,
     trackedReportUrl: `${dashboardBaseUrl}/api/outreach/click/${trackingToken}`,
     trackingPixelUrl: `${dashboardBaseUrl}/api/outreach/open/${trackingToken}.gif`,
+    unsubscribeUrl: `${dashboardBaseUrl}/api/outreach/unsubscribe/${trackingToken}`,
   };
+}
+
+function buildUnsubscribeUrl(trackingToken, options = {}) {
+  const dashboardBaseUrl = getDashboardBaseUrl(options);
+  return `${dashboardBaseUrl}/api/outreach/unsubscribe/${trackingToken}`;
 }
 
 function injectTrackedLink(message, trackedReportUrl) {
@@ -121,7 +127,7 @@ function renderTrackedMessageHtml(message, trackedReportUrl, selfScanUrl) {
   return renderHtmlWithLinks(textWithToken).replace(reportToken, ctaBlock);
 }
 
-function buildTrackedEmailHtml({ subject, message, siteName, siteUrl, trackedReportUrl, trackingPixelUrl, selfScanUrl }) {
+function buildTrackedEmailHtml({ subject, message, siteName, siteUrl, trackedReportUrl, trackingPixelUrl, selfScanUrl, unsubscribeUrl }) {
   const scanUrl = selfScanUrl || getDashboardBaseUrl();
 
   const safeSubject = escapeHtml(subject);
@@ -161,6 +167,7 @@ function buildTrackedEmailHtml({ subject, message, siteName, siteUrl, trackedRep
             <td style="font-family:'Segoe UI','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:12px;line-height:1.5;color:#9ca3af;text-align:left;">
               ADA Shield &mdash; Accessibility compliance reports<br>
               You received this because your website was selected for a complimentary accessibility review.
+              ${unsubscribeUrl ? `<br><a href="${escapeHtml(unsubscribeUrl)}" style="color:#9ca3af;text-decoration:underline;">Unsubscribe</a>` : ''}
             </td>
           </tr>
 
@@ -257,6 +264,7 @@ module.exports = {
   buildReportUrl,
   buildTrackingUrls,
   buildTrackedEmailHtml,
+  buildUnsubscribeUrl,
   calculateLeadScore,
   getLeadStatus,
   hashIpAddress,
