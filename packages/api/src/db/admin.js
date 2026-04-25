@@ -514,26 +514,10 @@ async function getLatestSiteScanSummary(siteId) {
  */
 async function markSiteAsContacted(siteId) {
   try {
-    // Fetch current count first (supabase-js v2 has no raw() increment)
-    const { data: current, error: fetchError } = await supabase
-      .from('sites')
-      .select('contacted_count')
-      .eq('id', siteId)
-      .single();
-    if (fetchError) throw fetchError;
-
-    const { data, error } = await supabase
-      .from('sites')
-      .update({
-        contacted_count: (current?.contacted_count || 0) + 1,
-        last_contacted_at: new Date().toISOString(),
-      })
-      .eq('id', siteId)
-      .select()
-      .single();
-
+    // Use rpc for atomic increment to avoid the read-modify-write race condition
+    // when multiple jobs (retry or concurrent) touch the same site simultaneously.
+    const { error } = await supabase.rpc('increment_site_contacted', { p_site_id: siteId });
     if (error) throw error;
-    return data;
   } catch (error) {
     logger.error('Failed to mark site as contacted', { siteId, error: error.message });
     throw error;
