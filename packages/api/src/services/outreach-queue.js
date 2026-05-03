@@ -264,9 +264,9 @@ function initOutreachWorker() {
         follow_up_attempts: newAttempts,
       });
 
-      // If still not opened after this no_open follow-up, reschedule another 1-week check
-      // (max 4 no-open follow-ups = 4 weeks of attempts before stopping)
-      if (rule === 'no_open' && Number(contact.opens_count || 0) === 0 && newAttempts < 4) {
+      // If still not opened after this no_open follow-up, reschedule one more 1-week check.
+      // Cap at 2 total no-open follow-ups (initial + 2 = 3 emails max to non-openers).
+      if (rule === 'no_open' && Number(contact.opens_count || 0) === 0 && newAttempts < 2) {
         try {
           await scheduleFollowUp({
             contactHistoryId: contact.id,

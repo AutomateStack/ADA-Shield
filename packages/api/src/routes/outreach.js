@@ -72,9 +72,10 @@ router.get('/open/:trackingToken.gif', async (req, res) => {
           // First open: cancel the 1-week no-open job, schedule 2-day follow-up
           await cancelFollowUp(updated.id, 'no_open').catch(() => false);
           await scheduleTrackedFollowUp(updated, 'opened_no_click', 2 * 24 * 60 * 60 * 1000);
-        } else if (newOpensCount >= 3 && newOpensCount % 3 === 0) {
-          // Every 3rd open (3, 6, 9...): schedule re-engagement follow-up at 30 min delay
-          // to avoid duplicate triggers from the same session
+        } else if (newOpensCount === 3) {
+          // Fire re-engagement follow-up only on the 3rd open (once per contact).
+          // Triggering on every 3rd open (3,6,9...) caused repeated emails because
+          // email clients pre-fetch tracking pixels multiple times per session.
           await scheduleTrackedFollowUp(updated, 'opened_repeat', 30 * 60 * 1000);
         }
       }
