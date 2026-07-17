@@ -275,7 +275,7 @@ function parseEmailList(value) {
     .filter(Boolean);
 }
 
-router.patch('/sites/:siteId', async (req, res, next) => {
+router.patch('/sites/:siteId([0-9a-fA-F-]{36})', async (req, res, next) => {
   try {
     const parsed = adminSitePatchSchema.safeParse(req.body);
     if (!parsed.success) {
