@@ -25,6 +25,9 @@ const { initDigestQueue, initDigestWorker, scheduleDailyDigest } = require('./se
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+const trustProxy = process.env.TRUST_PROXY === 'false' ? false : 1;
+
+app.set('trust proxy', trustProxy);
 
 // ── Request ID Middleware ───────────────────────────────────────────
 // Assigns a unique request ID for log correlation across the request lifecycle.

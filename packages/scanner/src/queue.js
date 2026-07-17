@@ -124,7 +124,7 @@ function createScanWorker(redisUrl, deps = {}) {
     },
     {
       connection,
-      concurrency: 2,
+      concurrency: 1,
       limiter: {
         max: 5,
         duration: 60000,

@@ -131,7 +131,7 @@ function initScanWorker() {
 
   const connection = parseRedisUrl(redisUrl);
   const dashboardUrl = process.env.DASHBOARD_URL || 'http://localhost:3000';
-  const workerConcurrency = parsePositiveInt(process.env.SCAN_WORKER_CONCURRENCY, 2);
+  const workerConcurrency = parsePositiveInt(process.env.SCAN_WORKER_CONCURRENCY, 1);
 
   scanWorker = new Worker(
     QUEUE_NAME,
