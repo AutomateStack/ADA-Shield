@@ -74,10 +74,10 @@ export default function ContactPage() {
                   <Mail className="h-4 w-4 text-brand-400" />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Email</p>
+                  <p className="text-xs text-slate-300 uppercase tracking-wider mb-1">Email</p>
                   <a
                     href="mailto:audit@adashield.net"
-                    className="text-sm text-slate-300 hover:text-white transition-colors"
+                    className="text-sm text-slate-200 hover:text-white transition-colors"
                   >
                     audit@adashield.net
                   </a>
@@ -89,8 +89,8 @@ export default function ContactPage() {
                   <Clock className="h-4 w-4 text-brand-400" />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Response Time</p>
-                  <p className="text-sm text-slate-300">Within 1 business day</p>
+                  <p className="text-xs text-slate-300 uppercase tracking-wider mb-1">Response Time</p>
+                  <p className="text-sm text-slate-200">Within 1 business day</p>
                 </div>
               </div>
 
@@ -99,8 +99,8 @@ export default function ContactPage() {
                   <Shield className="h-4 w-4 text-brand-400" />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">ADA Compliance Help</p>
-                  <p className="text-sm text-slate-300">Our team specializes in WCAG 2.1 AA standards and ADA law.</p>
+                  <p className="text-xs text-slate-300 uppercase tracking-wider mb-1">ADA Compliance Help</p>
+                  <p className="text-sm text-slate-200">Our team specializes in WCAG 2.1 AA standards and ADA law.</p>
                 </div>
               </div>
             </div>
@@ -117,10 +117,7 @@ export default function ContactPage() {
                   { label: 'Terms of Service', href: '/terms' },
                 ].map((link) => (
                   <li key={link.href}>
-                    <a
-                      href={link.href}
-                      className="text-sm text-slate-400 hover:text-brand-300 transition-colors"
-                    >
+                    <a href={link.href} className="text-sm text-slate-300 hover:text-brand-300 transition-colors">
                       → {link.label}
                     </a>
                   </li>
@@ -261,7 +258,7 @@ export default function ContactPage() {
                   )}
                 </button>
 
-                <p className="text-xs text-slate-600 text-center">
+                <p className="text-xs text-slate-400 text-center">
                   We respect your privacy. Your information is never sold or shared.
                 </p>
               </form>
