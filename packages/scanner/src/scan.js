@@ -105,6 +105,10 @@ const BROWSER_ARGS = [
   '--disable-extensions',
   '--disable-background-networking',
   '--no-zygote',
+  '--single-process',
+  '--disable-breakpad',
+  '--disable-crash-reporter',
+  '--disable-crashpad',
   '--memory-pressure-off',
 ];
 

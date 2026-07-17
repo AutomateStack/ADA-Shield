@@ -36,8 +36,9 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 # ── Railway memory-friendly defaults (can be overridden via Railway UI) ──
 # Railway Hobby plan has 8 GB RAM so the pool and concurrency can be
 # enabled without hitting OOM. Adjust these in Railway env if needed.
+ENV TRUST_PROXY=1
 ENV SCANNER_BROWSER_POOL=true
-ENV SCAN_WORKER_CONCURRENCY=2
+ENV SCAN_WORKER_CONCURRENCY=1
 ENV NODE_ENV=production
 
 WORKDIR /app
